@@ -1,0 +1,19 @@
+СТОРОННИЕ КОМПОНЕНТЫ И СЛОВАРИ
+
+Словари (частотные списки слов) — FrequencyWords, автор Hermit Dave: https://github.com/hermitdave/FrequencyWords
+Лицензия: Creative Commons Attribution-ShareAlike 4.0 (CC BY-SA 4.0), https://creativecommons.org/licenses/by-sa/4.0/
+Данные списков получены из субтитров проекта OpenSubtitles (https://www.opensubtitles.org) и корпуса OPUS (Jörg Tiedemann, https://opus.nlpl.eu). Словари LightBoard — адаптация этих списков (отбор слов, сортировка, сжатие); при распространении собранных словарей нужно указывать авторство и сохранять лицензию CC BY-SA 4.0.
+
+androidx.autofill — Copyright © The Android Open Source Project, лицензия Apache License 2.0: https://www.apache.org/licenses/LICENSE-2.0
+Компоненты Android (системные службы, распознавание речи, проверка орфографии, автозаполнение) принадлежат Google LLC и поставляются вашей системой.
+
+======================================================================
+
+THIRD-PARTY COMPONENTS AND DICTIONARIES
+
+Dictionaries (word-frequency lists) — FrequencyWords by Hermit Dave: https://github.com/hermitdave/FrequencyWords
+License: Creative Commons Attribution-ShareAlike 4.0 (CC BY-SA 4.0), https://creativecommons.org/licenses/by-sa/4.0/
+The lists are derived from subtitles of the OpenSubtitles project (https://www.opensubtitles.org) and the OPUS corpus (Jörg Tiedemann, https://opus.nlpl.eu). LightBoard dictionaries are an adaptation of these lists (word selection, sorting, compression); if you distribute built dictionaries you must credit the authors and keep the CC BY-SA 4.0 license.
+
+androidx.autofill — Copyright © The Android Open Source Project, Apache License 2.0: https://www.apache.org/licenses/LICENSE-2.0
+Android components (system services, speech recognition, spell checking, autofill) belong to Google LLC and are provided by your system.

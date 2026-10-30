@@ -1,0 +1,39 @@
+ПОЛИТИКА КОНФИДЕНЦИАЛЬНОСТИ
+
+LightBoard не собирает, не передаёт и не продаёт ваши данные. У приложения нет разрешения на доступ в интернет, нет аналитики, рекламы и сторонних сервисов слежения.
+
+Что хранится на устройстве (только в закрытой папке приложения):
+• слова и пары слов, которые клавиатура запомнила для подсказок (можно посмотреть, забыть или сбросить; не запоминаются в полях паролей, в полях с запретом обучения и в режиме инкогнито);
+• история буфера обмена (по умолчанию включена, срок хранения и очистка настраиваются; хранится в зашифрованном виде, ключ — в Android Keystore; строки, похожие на пароли и одноразовые коды, в историю не записываются; в режиме инкогнито не пишется; изображения и скриншоты в историю не попадают);
+• настройки и импортированные словари.
+Резервная копия создаётся только по вашей команде, сохраняется в выбранный вами файл (по умолчанию открытым текстом; по желанию шифруется вашим паролем: AES-256-GCM, ключ из пароля — PBKDF2-SHA256) и по умолчанию не включает буфер обмена.
+
+Разрешения, которые запрашиваются только при включении функции:
+• микрофон — голосовой ввод; распознавание выполняет системная служба (обычно Google), её политика действует отдельно; в полях паролей микрофон отключается;
+• подсказки слов для языков без своего словаря берутся у системной проверки орфографии: набираемое слово передаётся ей (в полях паролей — нет);
+• СМС (приём) — «Коды из СМС»: из сообщения берётся только код, он хранится только в памяти до 5 минут и удаляется после вставки; текст сообщений не сохраняется;
+• фото/память (чтение) — «Недавние скриншоты»: миниатюра показывается в подсказках и нигде не сохраняется.
+
+Клавиатура видит текст, который вы вводите, но обрабатывает его только на устройстве. Приложения, в которые вы печатаете, получают введённый текст как обычно. Для настроек отдельных приложений хранятся только названия пакетов выбранных вами приложений.
+Данные удаляются при очистке данных приложения или его удалении.
+
+======================================================================
+
+PRIVACY POLICY
+
+LightBoard does not collect, transmit or sell your data. The app has no internet permission and contains no analytics, ads or third-party tracking.
+
+What is stored on your device (only in the app's private folder):
+• words and word pairs the keyboard learned for suggestions (you can view, forget or reset them; nothing is learned in password fields, fields that forbid learning, or in incognito mode);
+• clipboard history (on by default; retention and clearing are configurable; stored encrypted with a key held in the Android Keystore; strings that look like passwords or one-time codes are not recorded; not recorded in incognito mode; images and screenshots never enter the history);
+• settings and imported dictionaries.
+A backup is created only on your command, saved to a file you choose (plain text by default; optionally encrypted with your password: AES-256-GCM, key derived with PBKDF2-SHA256), and does not include the clipboard by default.
+
+Permissions requested only when you turn a feature on:
+• microphone — voice input; recognition is done by the system service (usually Google), under its own policy; the microphone is disabled in password fields;
+• word suggestions for languages without their own dictionary come from the system spell checker, which receives the word being typed (never in password fields);
+• SMS (receive) — "SMS codes": only the code is taken from a message, kept in memory only for up to 5 minutes and removed after pasting; message text is not stored;
+• photos/storage (read) — "Recent screenshots": a thumbnail is shown in suggestions and is never saved.
+
+The keyboard sees the text you type but processes it only on the device. Apps you type into receive the text as usual. For per-app settings only the package names of the apps you choose are stored.
+Data is removed when you clear the app's data or uninstall it.
