@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="incognito_on">Інкогніто увімкнено</string>
+    <string name="incognito_off">Інкогніто вимкнено</string>
+    <string name="chip_screenshot">Скриншот</string>
+    <string name="chip_image">Зображення</string>
+</resources>

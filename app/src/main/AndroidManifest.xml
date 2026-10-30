@@ -1,0 +1,61 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <!-- голосовой ввод: распознавание речи системой (Google); запрашивается при первом нажатии на микрофон -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+    <!-- коды из СМС (только если включено в настройках; текст сообщений не сохраняется) -->
+    <uses-permission android:name="android.permission.RECEIVE_SMS"/>
+    <!-- недавние скриншоты в подсказках (только если включено в настройках; на Android 13+ система покажет запрос на доступ к фото) -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
+    <!-- уведомлений и доступа к устройствам в локальной сети быть не должно: даже если их добавит библиотека, при сборке они вырезаются -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" tools:node="remove"/>
+    <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" tools:node="remove"/>
+    <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" tools:node="remove"/>
+
+    <application
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:theme="@style/AppTheme"
+        android:allowBackup="false"
+        android:hardwareAccelerated="true"
+        android:supportsRtl="false">
+
+        <activity android:name=".SettingsActivity" android:exported="true" android:process=":settings"/>
+
+        <!-- значок на рабочем столе: включается и выключается в настройках («Ещё») -->
+        <activity-alias
+            android:name=".LauncherAlias"
+            android:targetActivity=".SettingsActivity"
+            android:enabled="true"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher"
+            android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity-alias>
+
+        <activity
+            android:name=".VoiceActivity"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:exported="false"/>
+
+        <receiver
+            android:name=".SmsReceiver"
+            android:exported="true"
+            android:permission="android.permission.BROADCAST_SMS">
+            <intent-filter><action android:name="android.provider.Telephony.SMS_RECEIVED"/></intent-filter>
+        </receiver>
+
+        <service
+            android:name=".LightBoardIme"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_INPUT_METHOD"
+            android:exported="true">
+            <intent-filter><action android:name="android.view.InputMethod"/></intent-filter>
+            <meta-data android:name="android.view.im" android:resource="@xml/method"/>
+        </service>
+    </application>
+</manifest>

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="incognito_on">Tryb incognito włączony</string>
+    <string name="incognito_off">Tryb incognito wyłączony</string>
+    <string name="chip_screenshot">Zrzut ekranu</string>
+    <string name="chip_image">Obraz</string>
+</resources>

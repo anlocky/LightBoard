@@ -1,0 +1,62 @@
+plugins { id 'com.android.application' }
+
+android {
+    namespace 'com.lightboard.keyboard'
+    compileSdk 33  // нужен для API размытия (31+); targetSdk остаётся 28
+
+    defaultConfig {
+        applicationId 'com.lightboard.keyboard'
+        minSdk 23
+        targetSdk 28
+        versionCode 36
+        versionName '1.18.0'
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+
+    // подпись: свой ключ из keystore.properties (storeFile, storePassword, keyAlias, keyPassword); нет файла — debug-ключ
+    def ksFile = rootProject.file('keystore.properties')
+    if (ksFile.exists()) {
+        def kp = new Properties()
+        ksFile.withInputStream { kp.load(it) }
+        signingConfigs {
+            release {
+                storeFile file(kp['storeFile']); storePassword kp['storePassword']
+                keyAlias kp['keyAlias']; keyPassword kp['keyPassword']
+            }
+        }
+    }
+
+    // без keystore.properties релиз подписывается debug-ключом: на другой машине подпись будет другой, и обновление поверх не встанет.
+    // Не ломаем сборку по умолчанию, но предупреждаем; -Plb.strictSigning=true делает это ошибкой.
+    if (!ksFile.exists()) {
+        def msg = 'LightBoard: keystore.properties не найден, релиз будет подписан DEBUG-ключом'
+        if (project.hasProperty('lb.strictSigning')) throw new GradleException(msg)
+        logger.warn('WARNING: ' + msg)
+    }
+
+    testOptions { unitTests.returnDefaultValues = true }
+
+    packaging { resources.excludes += ['META-INF/**', 'kotlin/**', '**/*.kotlin_*', 'DebugProbesKt.bin'] }
+
+    buildTypes {
+        release {
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            signingConfig ksFile.exists() ? signingConfigs.release : signingConfigs.debug
+        }
+    }
+
+    lint { abortOnError false }
+}
+// одна зависимость: androidx.autofill (стиль чипов автозаполнения Google); больше ничего нет
+
+dependencies {
+    compileOnly 'androidx.annotation:annotation:1.7.1' // только для компиляции: убирает предупреждения, в APK не попадает
+    implementation 'androidx.autofill:autofill:1.1.0' // стиль чипов автозаполнения (без него Google чипы не присылает)
+    testImplementation 'junit:junit:4.13.2' // только для проверок на компьютере, в APK не попадает
+}

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="incognito_on">Gizli mod açık</string>
+    <string name="incognito_off">Gizli mod kapalı</string>
+    <string name="chip_screenshot">Ekran görüntüsü</string>
+    <string name="chip_image">Görsel</string>
+</resources>

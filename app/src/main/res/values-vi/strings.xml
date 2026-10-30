@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="incognito_on">Đã bật chế độ ẩn danh</string>
+    <string name="incognito_off">Đã tắt chế độ ẩn danh</string>
+    <string name="chip_screenshot">Ảnh chụp màn hình</string>
+    <string name="chip_image">Hình ảnh</string>
+</resources>

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="incognito_on">Penyamaran aktif</string>
+    <string name="incognito_off">Penyamaran nonaktif</string>
+    <string name="chip_screenshot">Tangkapan layar</string>
+    <string name="chip_image">Gambar</string>
+</resources>
