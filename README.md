@@ -16,7 +16,7 @@ A lightweight, private keyboard for Android. Two designs (Material and an iOS-st
 **Typing**
 - Swipe typing with an optional trail, key popups and hints for digits and symbols
 - Suggestions, next-word prediction and autocorrection from dictionaries built on your device
-- 26 keyboard layouts (Latin, Cyrillic, Greek, Hebrew, Arabic, Persian); multilingual input follows the system language list
+- 60+ keyboard layouts (Latin, Cyrillic, Greek, Hebrew, Arabic, Persian); multilingual input follows the system language list
 - Phone, number, PIN and date pads; a dedicated tablet layout with arrow keys
 - Auto-capitalisation, automatic period, space after `.` and `,`, smart dash
 - Calculator: type `2+2*3=` and get the result in place
