@@ -4,22 +4,74 @@ import android.content.Context;
 import android.graphics.Color;
 import android.os.Build;
 
-/** Цвета для обеих панелей (буквы и эмодзи). Значения сняты с референсного скриншота iOS. */
 final class Theme {
     static final int ACCENT = Color.rgb(0, 122, 255), ACCENT_DOWN = Color.rgb(0, 98, 214);
 
     boolean dark, blur;
-    int panelPct = 60; // непрозрачность подложки при размытии, %
+    int panelPct = 60;
     int key, keyDown, spec, specDown, space, text, muted, div, shadow, pop, panelTop, panelBot;
-    int accent = ACCENT, onAccent = Color.WHITE; // используются только дизайном Gboard
+    int accent = ACCENT, onAccent = Color.WHITE;
+    int panelHue, panelInt, keyHue, keyInt, keyText, keyMuted;
+
+    private static final int DARK_TEXT = Color.rgb(28, 29, 34), DARK_MUTED = Color.rgb(104, 108, 120),
+            LIGHT_TEXT = Color.rgb(244, 245, 250), LIGHT_MUTED = Color.rgb(160, 164, 178);
 
     Theme() { update(); }
 
-    /** @return true, если что-то изменилось */
-    boolean set(boolean dark, boolean blur, int panelPct) {
-        if (this.dark == dark && this.blur == blur && this.panelPct == panelPct) return false;
-        this.dark = dark; this.blur = blur; this.panelPct = panelPct; update();
+    boolean set(boolean dark, boolean blur, int panelPct) { return set(dark, blur, panelPct, 0, 0, 0, 0); }
+
+    boolean set(boolean dark, boolean blur, int panelPct, int pHue, int pInt, int kHue, int kInt) {
+        if (this.dark == dark && this.blur == blur && this.panelPct == panelPct && panelHue == pHue && panelInt == pInt && keyHue == kHue && keyInt == kInt) return false;
+        this.dark = dark; this.blur = blur; this.panelPct = panelPct;
+        panelHue = pHue; panelInt = pInt; keyHue = kHue; keyInt = kInt;
+        update();
         return true;
+    }
+
+    static final int HUE_MAX = 380;
+
+    static int hueColor(int h) { return hue(h, 1f); }
+
+    private static int hue(int h, float v) {
+        if (h > 360) {
+            int k = Math.max(0, Math.round(255f * v * (HUE_MAX - Math.min(h, HUE_MAX)) / (HUE_MAX - 360)));
+            return Color.rgb(k, 0, 0);
+        }
+        return Color.HSVToColor(new float[]{h % 360, 1f, v});
+    }
+
+    private static int tintTo(int base, int target, float t) {
+        float u = 1f - t;
+        return Color.argb(Color.alpha(base), Math.round(Color.red(base) * u + Color.red(target) * t),
+                Math.round(Color.green(base) * u + Color.green(target) * t), Math.round(Color.blue(base) * u + Color.blue(target) * t));
+    }
+
+    private static boolean light(int c) { return 0.299f * Color.red(c) + 0.587f * Color.green(c) + 0.114f * Color.blue(c) > 148f; }
+
+    private void tint() {
+        if (panelInt > 0) {
+            int tp = hue(panelHue, 1f);
+            float t = panelInt / 100f;
+            panelTop = tintTo(panelTop, tp, t);
+            panelBot = tintTo(panelBot, tp, t);
+            boolean lt = light(panelBot);
+            text = lt ? DARK_TEXT : LIGHT_TEXT;
+            muted = lt ? DARK_MUTED : LIGHT_MUTED;
+            div = lt ? Color.argb(50, 70, 78, 110) : Color.argb(60, 255, 255, 255);
+        }
+        if (keyInt > 0) {
+            int tk = hue(keyHue, 1f), ts = hue(keyHue, 0.86f);
+            float t = keyInt / 100f;
+            key = tintTo(key, tk, t);
+            space = tintTo(space, tk, t);
+            pop = tintTo(pop, tk, t);
+            spec = tintTo(spec, ts, t);
+            keyDown = tintTo(keyDown, dark ? mix(key, Color.WHITE, 0.18f) : mix(key, Color.BLACK, 0.12f), t);
+            specDown = tintTo(specDown, dark ? mix(spec, Color.WHITE, 0.18f) : mix(spec, Color.BLACK, 0.12f), t);
+            boolean lt = light(key);
+            keyText = lt ? DARK_TEXT : LIGHT_TEXT;
+            keyMuted = lt ? DARK_MUTED : LIGHT_MUTED;
+        }
     }
 
     private void update() {
@@ -47,8 +99,9 @@ final class Theme {
             div = Color.argb(50, 70, 78, 110); shadow = Color.argb(24, 40, 50, 90);
             pop = Color.rgb(255, 255, 255);
         }
+        keyText = text; keyMuted = muted;
+        if (panelInt > 0 || keyInt > 0) tint();
     }
-
 
     static int fade(int c, float f) {
         if (f >= 0.999f) return c;

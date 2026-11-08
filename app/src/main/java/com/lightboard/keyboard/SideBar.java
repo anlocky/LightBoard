@@ -8,12 +8,11 @@ import android.graphics.Shader;
 import android.view.MotionEvent;
 import android.view.View;
 
-/** Свободная область рядом с суженной клавиатурой (режим одной руки): подложка в цвет клавиатуры и две кнопки. */
 final class SideBar extends View {
 
     interface Listener {
-        void onExpand(); // выйти из режима одной руки
-        void onFlip();   // перенести клавиатуру на другую сторону
+        void onExpand();
+        void onFlip();
     }
 
     private Theme th;
@@ -21,9 +20,9 @@ final class SideBar extends View {
     private Listener lis;
     private int W, H;
     private final Paint pPanel = new Paint(Paint.ANTI_ALIAS_FLAG), pFill = new Paint(Paint.ANTI_ALIAS_FLAG), pStroke = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private int down = -1; // кнопка под пальцем: 0 расширить, 1 перенести
-    private boolean leftSide; // панель слева от клавиатуры (клавиатура справа)
-    private View mate;        // клавиатура рядом: высоту берём у неё
+    private int down = -1;
+    private boolean leftSide;
+    private View mate;
 
     SideBar(Context c, Theme theme) {
         super(c);
@@ -35,7 +34,7 @@ final class SideBar extends View {
 
     void setListener(Listener l) { lis = l; }
     void setMate(View v) { mate = v; }
-    /** Кнопка переноса рисуется стрелкой в угол той стороны, где стоит эта панель. */
+
     void setLeftSide(boolean left) { if (leftSide != left) { leftSide = left; invalidate(); } }
 
     void setTheme(Theme t) { th = t; }
@@ -47,10 +46,6 @@ final class SideBar extends View {
         pPanel.setShader(new LinearGradient(0, 0, 0, H, th.panelTop, th.panelBot, Shader.TileMode.CLAMP));
     }
 
-    /**
-     * Своей высоты у вида нет: она равна высоте клавиатуры рядом. (FrameLayout не доизмеряет единственного потомка с match_parent,
-     * из-за чего панель получала высоту 0 и не показывалась; поэтому берём высоту прямо у клавиатуры, она измеряется раньше.)
-     */
     @Override protected void onMeasure(int w, int h) {
         int hh = mate != null ? mate.getMeasuredHeight() : 0;
         if (hh == 0 && MeasureSpec.getMode(h) == MeasureSpec.EXACTLY) hh = MeasureSpec.getSize(h);
@@ -76,11 +71,11 @@ final class SideBar extends View {
             pFill.setColor(Theme.fade(th.key, down == i ? 0.7f : 1f));
             c.drawCircle(cx, cy, (down == i ? 18 : 20) * u, pFill);
             pStroke.setColor(th.text);
-            if (i == 0) { // стрелки в обе стороны: вернуть полную ширину
+            if (i == 0) {
                 c.drawLine(cx - 9 * u, cy, cx + 9 * u, cy, pStroke);
                 c.drawLine(cx - 9 * u, cy, cx - 5.5f * u, cy - 3.5f * u, pStroke); c.drawLine(cx - 9 * u, cy, cx - 5.5f * u, cy + 3.5f * u, pStroke);
                 c.drawLine(cx + 9 * u, cy, cx + 5.5f * u, cy - 3.5f * u, pStroke); c.drawLine(cx + 9 * u, cy, cx + 5.5f * u, cy + 3.5f * u, pStroke);
-            } else {      // стрелка к стенке: перенести клавиатуру в этот угол
+            } else {
                 float dir = leftSide ? -1f : 1f, tip = cx + dir * 4 * u;
                 c.drawLine(cx + dir * 9 * u, cy - 6 * u, cx + dir * 9 * u, cy + 6 * u, pStroke);
                 c.drawLine(cx - dir * 8 * u, cy, tip, cy, pStroke);

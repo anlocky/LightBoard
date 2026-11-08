@@ -2,12 +2,11 @@ package com.lightboard.keyboard;
 
 import java.util.Random;
 
-/** Короткие щелчки, синтезируемые в коде (чистая Java): на выходе готовый WAV (моно, 16 бит, 44,1 кГц). Реальные записи iOS не используются. */
 final class ClickSynth {
     private ClickSynth() { }
 
     static final int RATE = 44100;
-    // буква — самый «звонкий» и короткий, стереть ниже, служебные клавиши (пробел, shift, 123, return) глуше всего
+
     private static final float[] FREQ = {2100f, 1500f, 1150f}, TAU = {0.0085f, 0.011f, 0.013f};
 
     static byte[] wav(int kind) {

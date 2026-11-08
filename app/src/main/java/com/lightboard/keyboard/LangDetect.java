@@ -3,14 +3,9 @@ package com.lightboard.keyboard;
 import java.util.HashSet;
 import java.util.List;
 
-/**
- * Определяет язык словаря по самим словам (список от частых к редким): письменность, затем буквы-«метки» и самые частые слова языка.
- * Нужен, когда в имени файла нет кода языка. Ответ — только предположение: перед сборкой словаря человек его подтверждает.
- */
 final class LangDetect {
     private LangDetect() { }
 
-    /** {код, частые слова через пробел, буквы-метки}; слова — только для латиницы. */
     private static final String[][] LATIN = {
         {"en", "the of and to in is you that it he was for on are with as his they at be this have from or one had by not but what all were we when your can said there use an each which she do how their if will up other about out many then them these so some her would make like him into time has look two more write go see no way could people my than first water been call who oil its now find long down day did get come made may part", "" },
         {"de", "der die und in den von zu das mit sich des auf für ist im dem nicht ein eine als auch es an werden aus er hat dass sie nach wird bei einer um am sind noch wie einem über einen so zum war haben nur oder aber vor zur bis mehr durch man sein wurde sei ich du", "äöüß"},
@@ -76,7 +71,6 @@ final class LangDetect {
 
     private static int letters(List<String> words) { int n = 0; for (String w : words) n += w.length(); return n; }
 
-    /** Код языка (как в Layouts) или null, если уверенного ответа нет. Слова — в нижнем регистре, от частых к редким. */
     static String detect(List<String> words) {
         if (words == null || words.size() < 20) return null;
         int[] sc = new int[15];
@@ -115,7 +109,7 @@ final class LangDetect {
             }
             default: break;
         }
-        // латиница: частые слова и буквы с диакритикой
+
         HashSet<String>[] st = stop();
         int lim = Math.min(150, words.size());
         double best = 0, second = 0;

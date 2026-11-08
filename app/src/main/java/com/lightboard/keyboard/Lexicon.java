@@ -13,29 +13,58 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 
-/**
- * Словарь одного языка одним блоком: слова по алфавиту в одном byte[] (1 байт на букву, номер буквы в алфавите словаря)
- * + частота (1 байт) на слово. Алфавит хранится в самом файле, поэтому подходит любой язык (до 254 букв).
- * Поиск по префиксу и по первой букве — бинарным поиском. В памяти держится только словарь активного языка.
- * Файл lex_&lt;язык&gt;.lex берётся из filesDir (импортированный), иначе из assets (встроенный).
- */
 final class Lexicon {
-    static final int MAGIC = 0x4C455834; // LEX4
+    static final int MAGIC = LexBuilder.MAGIC;
 
     private static Lexicon cur;
     private static String curLang, loadingLang;
-    private static final HashSet<String> have = new HashSet<>();      // языки, для которых словарь есть
-    private static final HashMap<String, Long> seen = new HashMap<>(); // файл -> время изменения: заголовок читаем только при изменении
+    private static final HashSet<String> have = new HashSet<>();
+    private static final HashMap<String, Long> seen = new HashMap<>();
 
     final int n;
     final byte[] freq;
     final int[] off;
     final byte[] ch;
-    final char[] alpha; // alpha[0] не используется, байт буквы = номер в алфавите (по возрастанию кода)
-    long stamp; // у запасного словаря совпадает со временем файла, который не удалось прочитать: иначе он перечитывался бы при каждом входе в поле
-    private final boolean[] adj; // соседние клавиши (по раскладке языка): замена на соседнюю букву дешевле
+    final char[] alpha;
+    long stamp;
+    private final boolean[] adj;
     private final String[] rows;
-    private final int[] fold; // буква с диакритикой -> номер той же буквы без неё (e вместо é): такая замена почти ничего не стоит
+    private final int[] fold;
+    private final long[] tri = new long[TRI_BITS >>> 6];
+
+    private static final int TRI_BITS = 1 << 18;
+
+    private static int triHash(int a, int b, int c) {
+        int h = a * 0x9E3779B1 + b * 0x85EBCA6B + c * 0xC2B2AE35;
+        h ^= h >>> 15; h *= 0x2C1B3C6D; h ^= h >>> 12;
+        return h & (TRI_BITS - 1);
+    }
+
+    private void addTri(int a, int b, int c) { int h = triHash(a, b, c); tri[h >>> 6] |= 1L << (h & 63); }
+
+    private boolean hasTri(int a, int b, int c) { int h = triHash(a, b, c); return (tri[h >>> 6] & (1L << (h & 63))) != 0L; }
+
+    private void buildTri() {
+        for (int i = 0; i < n; i++) {
+            int s = off[i], e = off[i + 1];
+            int a = 0, b = 0;
+            for (int k = s; k < e; k++) { int c = ch[k] & 0xFF; addTri(a, b, c); a = b; b = c; }
+            addTri(a, b, 0);
+        }
+    }
+
+    int unseenTriples(String w) {
+        if (n < 5000) return -1;
+        int a = 0, b = 0, bad = 0, wl = w.length();
+        for (int i = 0; i < wl; i++) {
+            int c = indexOf(w.charAt(i));
+            if (c < 0) return 9;
+            if (!hasTri(a, b, c)) bad++;
+            a = b; b = c;
+        }
+        if (!hasTri(a, b, 0)) bad++;
+        return bad;
+    }
 
     private Lexicon(int n, byte[] freq, int[] off, byte[] ch, char[] alpha, long stamp, String[] rows) {
         this.n = n; this.freq = freq; this.off = off; this.ch = ch; this.alpha = alpha; this.stamp = stamp; this.rows = rows;
@@ -52,9 +81,9 @@ final class Lexicon {
         }
         fold = new int[a];
         for (int i = 1; i < a; i++) fold[i] = baseIndex(alpha[i]);
+        buildTri();
     }
 
-    /** Номер буквы без диакритики в алфавите словаря или 0. Только латиница, греческий и «ё»: в остальных письменностях такие пары — разные буквы. */
     private int baseIndex(char x) {
         if (!((x >= 0xC0 && x <= 0x24F) || (x >= 0x1E00 && x <= 0x1EFF) || (x >= 0x370 && x <= 0x3FF) || (x >= 0x1F00 && x <= 0x1FFF) || x == 0x451)) return 0;
         char b;
@@ -78,14 +107,11 @@ final class Lexicon {
         return k > 0 && alpha[k] != x ? k : 0;
     }
 
-    /** Номер буквы в алфавите словаря или -1. */
     int indexOf(char c) { int k = Arrays.binarySearch(alpha, 1, alpha.length, c); return k > 0 ? k : -1; }
 
-    // ---------- какие словари есть и какой загружен ----------
-    /** Уже загруженный словарь языка или null (не блокирует поток интерфейса). */
     static synchronized Lexicon peek(String lang) { return lang.equals(curLang) ? cur : null; }
 
-    private static int gen; // поколение: загрузка, начатая до invalidate(), результат не публикует (словарь не остаётся в памяти зря)
+    private static int gen;
 
     static synchronized void invalidate() { cur = null; curLang = null; loadingLang = null; gen++; }
 
@@ -93,39 +119,98 @@ final class Lexicon {
 
     static File file(Context c, String lang) { return new File(c.getFilesDir(), "lex_" + lang + ".lex"); }
 
-    /** Настройки работают в другом процессе: смотрим, какие словари появились или изменились. */
+    private static String[] assetNames;
+    private static long pkgRev = -1L;
+
+    private static synchronized String[] assets(Context c) {
+        if (assetNames == null) {
+            String[] l = null;
+            try { l = c.getAssets().list("lex"); } catch (IOException ignored) { }
+            assetNames = l == null ? new String[0] : l;
+        }
+        return assetNames;
+    }
+
+    private static synchronized long rev(Context c) {
+        if (pkgRev < 0) {
+            long r = 0L;
+            try { r = new File(c.getApplicationInfo().sourceDir).lastModified(); } catch (RuntimeException ignored) { }
+            pkgRev = Math.max(1L, r);
+        }
+        return pkgRev;
+    }
+
+    private static File offFile(Context c, String lang) { return new File(c.getFilesDir(), "lex_" + lang + ".lex.off"); }
+
+    static boolean builtin(Context c, String lang) {
+        String n = "lex_" + lang + ".lex";
+        for (String x : assets(c)) if (x.equals(n)) return !offFile(c, lang).exists();
+        return false;
+    }
+
+    static boolean exists(Context c, String lang) { return file(c, lang).exists() || builtin(c, lang); }
+
+    static InputStream open(Context c, String lang) throws IOException {
+        File f = file(c, lang);
+        if (f.exists()) return new FileInputStream(f);
+        if (builtin(c, lang)) return c.getAssets().open("lex/lex_" + lang + ".lex");
+        throw new java.io.FileNotFoundException(lang);
+    }
+
+    static java.util.List<String> ids(Context c) {
+        java.util.TreeSet<String> r = new java.util.TreeSet<>();
+        String[] fl = c.getFilesDir().list();
+        if (fl != null) for (String f : fl) if (f.startsWith("lex_") && f.endsWith(".lex")) r.add(f.substring(4, f.length() - 4));
+        for (String x : assets(c)) {
+            if (!x.startsWith("lex_") || !x.endsWith(".lex")) continue;
+            String lang = x.substring(4, x.length() - 4);
+            if (!offFile(c, lang).exists()) r.add(lang);
+        }
+        return new java.util.ArrayList<>(r);
+    }
+
+    static void remove(Context c, String lang) {
+        File f = file(c, lang);
+        f.delete();
+        new File(f.getPath() + ".tmp").delete();
+        String n = "lex_" + lang + ".lex";
+        for (String x : assets(c)) if (x.equals(n)) {
+            try { new java.io.FileOutputStream(offFile(c, lang)).close(); } catch (IOException ignored) { }
+            break;
+        }
+    }
+
+    static void restore(Context c, String lang) { offFile(c, lang).delete(); }
+
     static synchronized void refreshIfChanged(Context c) {
         have.clear();
-        String[] fl = c.getFilesDir().list();
-        if (fl != null) for (String f : fl) note(c, f, false);
-        try { String[] as = c.getAssets().list(""); if (as != null) for (String f : as) note(c, f, true); } catch (IOException ignored) { }
+        for (String lang : ids(c)) note(c, lang);
         if (cur != null && cur.stamp != stampOf(c, curLang)) cur = null;
     }
 
-    private static void note(Context c, String f, boolean asset) {
-        if (!f.startsWith("lex_") || !f.endsWith(".lex")) return;
-        String lang = f.substring(4, f.length() - 4);
-        if (!asset || !have.contains(lang)) have.add(lang);
-        long m = asset ? -1L : new File(c.getFilesDir(), f).lastModified();
-        Long old = seen.get(f);
+    private static void note(Context c, String lang) {
+        have.add(lang);
+        String key = "lex_" + lang + ".lex";
+        long m = stampOf(c, lang);
+        Long old = seen.get(key);
         if (old != null && old == m) return;
-        seen.put(f, m);
-        try (InputStream in = asset ? c.getAssets().open(f) : new FileInputStream(new File(c.getFilesDir(), f))) {
+        seen.put(key, m);
+        try (InputStream in = open(c, lang)) {
             DataInputStream di = new DataInputStream(new BufferedInputStream(in, 1024));
             di.skipBytes(16);
             int k = di.readUnsignedByte();
             char[] a = new char[k];
             for (int i = 0; i < k; i++) a[i] = di.readChar();
-            Layouts.alphabetChanged(lang, new String(a)); // из него у языков без своей раскладки берутся буквы с диакритикой
+            Layouts.alphabetChanged(lang, new String(a));
         } catch (IOException | RuntimeException ignored) { }
     }
 
     private static long stampOf(Context c, String lang) {
         File f = file(c, lang);
-        return f.exists() ? f.lastModified() : 0L;
+        if (f.exists()) return f.lastModified();
+        return builtin(c, lang) ? rev(c) : 0L;
     }
 
-    /** Грузит в фоне; onDone выполняется в главном потоке (можно null). */
     static void preload(final Context c, final String lang, final Runnable onDone) {
         final int g;
         synchronized (Lexicon.class) {
@@ -149,27 +234,24 @@ final class Lexicon {
     }
 
     static Lexicon load(Context c, String lang) {
-        File f = file(c, lang);
-        if (f.exists()) {
-            try (InputStream in = new BufferedInputStream(new FileInputStream(f), 1 << 16)) { return read(in, f.lastModified(), lang); }
+        if (exists(c, lang)) {
+            long stamp = stampOf(c, lang);
+            try (InputStream in = new BufferedInputStream(open(c, lang), 1 << 16)) { return read(in, stamp, lang); }
             catch (IOException | RuntimeException ignored) { }
-            Lexicon b = loadBuiltin(c, lang); // файл битый: берём встроенный, но помним время файла (иначе перечитывали бы каждый раз)
-            b.stamp = f.lastModified();
+            Lexicon b = empty(lang);
+            b.stamp = stamp;
             return b;
         }
-        return loadBuiltin(c, lang);
+        return empty(lang);
     }
 
-    /** Встроенный словарь из assets (игнорирует импортированный). */
-    static Lexicon loadBuiltin(Context c, String lang) {
-        try (InputStream in = c.getAssets().open("lex_" + lang + ".lex")) { return read(in, 0L, lang); }
-        catch (IOException | RuntimeException e) { return new Lexicon(0, new byte[0], new int[]{0}, new byte[0], new char[1], 0L, rowsOf(lang)); }
+    private static Lexicon empty(String lang) {
+        return new Lexicon(0, new byte[0], new int[]{0}, new byte[0], new char[1], 0L, rowsOf(lang));
     }
 
-    /** Число слов в словаре языка (читает только заголовок файла), 0 — словаря нет. */
     static int count(Context c, String lang) {
-        File f = file(c, lang);
-        try (DataInputStream di = new DataInputStream(f.exists() ? new FileInputStream(f) : c.getAssets().open("lex_" + lang + ".lex"))) {
+        if (!exists(c, lang)) return 0;
+        try (DataInputStream di = new DataInputStream(open(c, lang))) {
             di.readInt();
             return di.readInt();
         } catch (IOException e) { return 0; }
@@ -180,21 +262,16 @@ final class Lexicon {
         return l != null ? new String[]{l.r1, l.r2, l.r3} : new String[]{"qwertyuiop", "asdfghjkl", "zxcvbnm"};
     }
 
-    /**
-     * LEX4: int магия, int число слов, int число букв всего, int длина блока, byte число букв алфавита, char[] алфавит,
-     * byte[n] частоты, затем для каждого слова: длина общего начала с прошлым словом, хвост (номера букв), 0.
-     * Весь блок читается одним readFully: без тысяч мелких чтений ассета.
-     */
     private static Lexicon read(InputStream in, long stamp, String lang) throws IOException {
         DataInputStream di = new DataInputStream(in);
         if (di.readInt() != MAGIC) throw new IOException("bad lexicon");
         int n = di.readInt(), total = di.readInt(), plen = di.readInt(), m = di.readUnsignedByte();
-        if (n < 0 || n > 1_000_000 || total < 0 || total > 16_000_000 || plen < 0 || plen > 16_000_000 || m < 1 || m > 254) throw new IOException("bad lexicon header"); // битый файл: не выделяем гигантские массивы
+        if (n < 0 || n > 1_000_000 || total < 0 || total > 16_000_000 || plen < 0 || plen > 16_000_000 || m < 1 || m > 254) throw new IOException("bad lexicon header");
         char[] alpha = new char[m + 1];
         for (int i = 1; i <= m; i++) alpha[i] = di.readChar();
         byte[] freq = new byte[n];
         di.readFully(freq);
-        InputStream pl = new BufferedInputStream(di, 1 << 15); // блок префиксов читается потоком: второй такой же массив в памяти не нужен
+        InputStream pl = new BufferedInputStream(di, 1 << 15);
         int[] off = new int[n + 1];
         byte[] ch = new byte[total];
         int q = 0, pos = 0, prevS = 0, prevL = 0;
@@ -212,7 +289,7 @@ final class Lexicon {
                 int b = pl.read();
                 q++;
                 if (b < 0) throw new IOException("bad lexicon eof");
-                if (b == 0) break; // завершающий 0
+                if (b == 0) break;
                 if (pos >= total || b > m) throw new IOException("bad lexicon size");
                 ch[pos++] = (byte) b;
             }
@@ -222,7 +299,6 @@ final class Lexicon {
         return new Lexicon(n, freq, off, ch, alpha, stamp, rowsOf(lang));
     }
 
-    // ---------- доступ ----------
     char at(int i) { return alpha[ch[i] & 0xFF]; }
 
     String word(int i) {
@@ -244,16 +320,29 @@ final class Lexicon {
         return lo;
     }
 
-    /** Первый индекс слова, большего любого слова с префиксом p. */
     int prefixEnd(String p) {
         return lowerBound(p.substring(0, p.length() - 1) + (char) (p.charAt(p.length() - 1) + 1));
     }
 
     boolean contains(String w) { int i = lowerBound(w); return i < n && compare(i, w) == 0; }
 
-    /** До out.length самых частотных продолжений префикса (сам префикс не включается). */
+    private final java.util.concurrent.ConcurrentHashMap<String, String[]> topCache = new java.util.concurrent.ConcurrentHashMap<>();
+
     int suggest(String p, String[] out) {
         if (p.isEmpty() || n == 0) return 0;
+        if (p.length() > 2 || out.length > 3) return scan(p, out);
+        String[] c = topCache.get(p);
+        if (c == null) {
+            String[] tmp = new String[3];
+            c = Arrays.copyOf(tmp, scan(p, tmp));
+            topCache.put(p, c);
+        }
+        int m = Math.min(c.length, out.length);
+        System.arraycopy(c, 0, out, 0, m);
+        return m;
+    }
+
+    private int scan(String p, String[] out) {
         int lo = lowerBound(p), hi = prefixEnd(p), plen = p.length();
         int k = out.length;
         int[] bi = new int[k], bf = new int[k];
@@ -273,17 +362,9 @@ final class Lexicon {
         return found;
     }
 
-    // ---------- исправление опечаток ----------
     private static final float INF = 99f;
 
-    /**
-     * Взвешенное расстояние Дамерау–Левенштейна: соседние клавиши дешевле, перестановка 0.7.
-     * Считается только в полосе |i-j| <= band, где band = (int) limit: любая клетка дальше от диагонали требует
-     * не меньше band+1 вставок/удалений (по 1.0 каждая), то есть заведомо дороже limit, поэтому результат
-     * (расстояние, если оно <= limit, иначе «много») точно такой же, как у полного расчёта, но клеток в 3 раза меньше.
-     * q — номера букв слова в алфавите словаря (-1: такой буквы в словаре нет).
-     */
-    private float wed(int[] q, int bi, float limit, float[] r0, float[] r1, float[] r2) {
+    private float wed(int[] q, int bi, float limit, float[] r0, float[] r1, float[] r2, float[] tc) {
         final int la = q.length, bs = off[bi], m = off[bi + 1] - bs, band = (int) limit, a = alpha.length;
         if (la - m > band || m - la > band) return INF;
         final byte[] ch = this.ch;
@@ -300,10 +381,16 @@ final class Lexicon {
             for (; j <= hi; j++) {
                 final int bb = ch[bs + j - 1] & 0xFF;
                 float v = p1[j - 1];
-                if (ac != bb) v += (ac > 0 && (fd[bb] == ac || fd[ac] == bb)) ? 0.12f : ((ac > 0 && tab[ac * a + bb]) ? 0.5f : 1f);
+                if (ac != bb) {
+                    if (ac > 0 && (fd[bb] == ac || fd[ac] == bb)) v += 0.12f;
+                    else {
+                        float tv = tc != null ? tc[(i - 1) * a + bb] : -1f;
+                        v += tv >= 0f ? tv : ((ac > 0 && tab[ac * a + bb]) ? 0.5f : 1f);
+                    }
+                }
                 float t;
-                if (j <= i - 1 + band) { t = p1[j] + 1f; if (t < v) v = t; }      // клетка (i-1, j) в полосе
-                if (j - 1 >= i - band) { t = cur[j - 1] + 1f; if (t < v) v = t; } // клетка (i, j-1) в полосе
+                if (j <= i - 1 + band) { t = p1[j] + 1f; if (t < v) v = t; }
+                if (j - 1 >= i - band) { t = cur[j - 1] + 1f; if (t < v) v = t; }
                 if (i > 1 && j > 1 && ac == (ch[bs + j - 2] & 0xFF) && q[i - 2] == bb) {
                     t = p2[j - 2] + 0.7f; if (t < v) v = t;
                 }
@@ -316,40 +403,76 @@ final class Lexicon {
         return p1[m];
     }
 
-    /** Лучшая правка слова (в нижнем регистре) или null, если слово уже известно / уверенной правки нет. */
-    String correct(String w) {
+    String correct(String w) { return correct(w, 0L); }
+
+    /** @param budgetNs 0 = unlimited; otherwise gives up (returns null) when the search takes longer than this. */
+    String correct(String w, long budgetNs) { return search(w, budgetNs, false, null); }
+
+    String correct(String w, long budgetNs, Touch t) { return search(w, budgetNs, false, t); }
+
+    String autoCorrect(String w, long budgetNs) { return search(w, budgetNs, true, null); }
+
+    String autoCorrect(String w, long budgetNs, Touch t) { return search(w, budgetNs, true, t); }
+
+    private float[] touchCosts(String w, Touch t) {
+        final int a = alpha.length, wl = w.length();
+        float[] tc = new float[wl * a];
+        for (int i = 0; i < wl; i++) {
+            int cnt = t.n[i], base = i * a;
+            if (cnt == 0) { for (int k = 0; k < a; k++) tc[base + k] = -1f; continue; }
+            for (int k = 0; k < a; k++) tc[base + k] = 1f;
+            float d0 = t.d2[i][0];
+            for (int k = 0; k < cnt; k++) if (t.ch[i][k] == t.typed[i]) { d0 = t.d2[i][k]; break; }
+            for (int k = 0; k < cnt; k++) {
+                int x = indexOf(t.ch[i][k]);
+                if (x < 0 || t.ch[i][k] == t.typed[i]) continue;
+                float c = 0.1f + 0.25f * Math.max(0f, t.d2[i][k] - d0) / 0.3f;
+                tc[base + x] = c > 1f ? 1f : c;
+            }
+        }
+        return tc;
+    }
+
+    private String search(String w, long budgetNs, boolean auto, Touch t) {
+        final long deadline = budgetNs > 0 ? System.nanoTime() + budgetNs : 0L;
         int wl = w.length();
         if (n == 0 || wl < 3 || wl > 20 || contains(w)) return null;
-        float limit = wl <= 4 ? 1.0f : 1.55f, bestScore = 1e9f;
+        float limit = wl <= 4 ? 1.0f : 1.55f, bestScore = 1e9f, bestCost = 0f;
         final int band = (int) limit, a = alpha.length;
         int best = -1;
-        final float[] r0 = new float[48], r1 = new float[48], r2 = new float[48]; // свои на вызов: correct() работает и в фоновом потоке
+        final float[] r0 = new float[48], r1 = new float[48], r2 = new float[48];
         final int[] q = new int[wl];
         for (int i = 0; i < wl; i++) q[i] = indexOf(w.charAt(i));
-        char c0 = w.charAt(0), c1 = w.charAt(1); // c1: «hte» -> «the» (первые две буквы переставлены)
+        final float[] tc = t != null && t.matches(w) ? touchCosts(w, t) : null;
+        char c0 = w.charAt(0), c1 = w.charAt(1);
         final int q0 = q[0], q1 = q[1];
-        for (int fi = 1; fi < a; fi++) { // первая буква кандидата: набранная, соседняя клавиша, вторая (перестановка) или та же буква с диакритикой
+        for (int fi = 1; fi < a; fi++) {
             char fc = alpha[fi];
             int bf = fold[fi] > 0 ? fold[fi] : fi;
             if (!(fc == c0 || fc == c1 || bf == q0 || bf == q1 || (q0 > 0 && (adj[q0 * a + fi] || adj[q0 * a + bf])))) continue;
             boolean same = fc == c0 || (q0 > 0 && (fold[fi] == q0 || fold[q0] == fi));
             int lo = lowerBound(String.valueOf(fc)), hi = lowerBound(String.valueOf((char) (fc + 1)));
             for (int i = lo; i < hi; i++) {
+                if (deadline != 0L && (i & 127) == 0 && System.nanoTime() > deadline) return null;
                 int l = off[i + 1] - off[i];
-                if (l - wl > band || wl - l > band) continue; // разница длин дороже порога
-                float cost = wed(q, i, limit, r0, r1, r2);
+                if (l - wl > band || wl - l > band) continue;
+                float cost = wed(q, i, limit, r0, r1, r2, tc);
                 if (cost > limit) continue;
-                if (!same) cost += 0.3f; // ошибка в первой букве встречается реже
+                if (!same) cost += 0.3f;
                 float score = cost - 0.35f * (freq[i] & 0xFF) / 255f;
-                if (score < bestScore && cost <= limit) { bestScore = score; best = i; }
+                if (score < bestScore && cost <= limit) { bestScore = score; best = i; bestCost = cost; }
             }
         }
-        return best < 0 ? null : word(best);
+        if (best < 0) return null;
+        if (auto) {
+            int un = unseenTriples(w);
+            if (un >= 0 && -0.0495f * (255 - (freq[best] & 0xFF)) - 4f * bestCost + 0.8f * wl + 5f * un < -6f) return null;
+        }
+        return word(best);
     }
 
     private int find(String w) { int i = lowerBound(w); return i < n && compare(i, w) == 0 ? i : -1; }
 
-    /** Слитное слово -> «слово слово» (пропущен пробел), если обе части (от двух букв) из частых слов словаря; иначе null. */
     String split(String w) {
         int wl = w.length();
         if (n == 0 || wl < 5 || wl > 24) return null;
@@ -362,6 +485,6 @@ final class Lexicon {
             int f = Math.min(freq[i] & 0xFF, freq[j] & 0xFF);
             if (f > bestF) { bestF = f; best = k; }
         }
-        return best < 0 || bestF < 70 ? null : w.substring(0, best) + " " + w.substring(best); // 70 — примерно первые 10 000 слов
+        return best < 0 || bestF < 70 ? null : w.substring(0, best) + " " + w.substring(best);
     }
 }

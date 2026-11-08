@@ -23,10 +23,6 @@ import java.util.Collections;
 import java.util.List;
 import java.util.function.Consumer;
 
-/**
- * Автозаполнение Google (и других служб) в полосе подсказок: система присылает готовые «чипы», клавиатура лишь показывает их над клавишами
- * вместо обычных подсказок. Android 11+; класс грузится только там, где он нужен.
- */
 final class AutofillBar {
     interface Cb { void shown(boolean on); }
 
@@ -36,28 +32,26 @@ final class AutofillBar {
     private HorizontalScrollView bar;
     private LinearLayout row;
     private boolean has;
-    private int gen; // номер ответа: запоздавшие чипы от прошлого списка не добавляем
+    private int gen;
 
     AutofillBar(Context c, FrameLayout root, Cb cb) { ctx = c; this.root = root; this.cb = cb; }
 
-    /** Запрос к службе автозаполнения: чипы высотой в полосу подсказок. */
     static InlineSuggestionsRequest request(int heightPx, float den, int textColor, int hintColor) {
         Size min = new Size((int) (60 * den), (int) (32 * den)), max = new Size((int) (260 * den), Math.max(heightPx, (int) (36 * den)));
-        // чип без подложки и значков-капсул: текст тем же цветом и размером, что у обычных подсказок
+
         ViewStyle chip = new ViewStyle.Builder().setBackgroundColor(android.graphics.Color.TRANSPARENT).setPadding((int) (10 * den), 0, (int) (10 * den), 0).build();
         InlineSuggestionUi.Style style = InlineSuggestionUi.newStyleBuilder()
                 .setChipStyle(chip).setSingleIconChipStyle(chip)
                 .setTitleStyle(new TextViewStyle.Builder().setTextColor(textColor).setTextSize(15f).build())
                 .setSubtitleStyle(new TextViewStyle.Builder().setTextColor(hintColor).setTextSize(12f).build())
                 .build();
-        Bundle styles = UiVersions.newStylesBuilder().addStyle(style).build(); // без стиля службы автозаполнения Google чипы не присылает
+        Bundle styles = UiVersions.newStylesBuilder().addStyle(style).build();
         InlinePresentationSpec spec = new InlinePresentationSpec.Builder(min, max).setStyle(styles).build();
         return new InlineSuggestionsRequest.Builder(Collections.singletonList(spec)).setMaxSuggestionCount(6).build();
     }
 
     boolean has() { return has; }
 
-    /** strip — {слева, справа, высота} полосы, board — параметры вида клавиатуры (чтобы совпасть с ним в режиме одной руки). */
     void show(List<InlineSuggestion> list, int[] strip, FrameLayout.LayoutParams board) {
         if (list == null || list.isEmpty()) { clear(); return; }
         if (bar == null) {
@@ -82,7 +76,7 @@ final class AutofillBar {
             s.inflate(ctx, wrap, ctx.getMainExecutor(), new Consumer<InlineContentView>() {
                 @Override public void accept(InlineContentView v) {
                     if (v == null || bar == null || g != gen) return;
-                    // Размер чипа задаёт сама система (ему уже выставлены LayoutParams с реальным размером surface). Перезапишем на WRAP_CONTENT — получим 0 и пустое место.
+
                     ViewGroup.LayoutParams own = v.getLayoutParams();
                     LinearLayout.LayoutParams p = own != null ? new LinearLayout.LayoutParams(own.width, own.height)
                             : new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT);
@@ -94,14 +88,13 @@ final class AutofillBar {
         }
     }
 
-    /** Меню над клавишами открыто: чипы временно прячем. */
     void setHidden(boolean hidden) {
         if (bar != null) bar.setVisibility(has && !hidden ? View.VISIBLE : View.INVISIBLE);
     }
 
     void clear() {
         gen++;
-        if (bar != null) { root.removeView(bar); bar = null; row = null; } // без чипов вид не держим в памяти
+        if (bar != null) { root.removeView(bar); bar = null; row = null; }
         if (has) { has = false; cb.shown(false); }
     }
 }

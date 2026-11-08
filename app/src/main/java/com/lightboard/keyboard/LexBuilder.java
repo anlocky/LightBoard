@@ -14,14 +14,11 @@ import java.util.Comparator;
 import java.util.HashSet;
 import java.util.Locale;
 
-/**
- * Собирает словарь языка из списка «слово частота» (формат FrequencyWords, от частых к редким) в формат LEX4.
- * Берутся только слова из букв письменности раскладки этого языка; алфавит определяется по самим словам.
- */
 final class LexBuilder {
     private LexBuilder() { }
 
-    /** Письменность буквы: 1 латиница, 2 кириллица, 3 греческий, 4 иврит, 5 арабское письмо, 6 армянский, 7 грузинский, 8 тайский, 9 деванагари, 10 бенгальский, 11 тамильский, 12 телугу, 13 малаялам, 14 сингальский, 0 прочее. */
+    static final int MAGIC = 0x4C455834;
+
     static int sc(char c) {
         if ((c >= 'a' && c <= 'z') || (c >= 0xC0 && c <= 0x24F) || (c >= 0x1E00 && c <= 0x1EFF)) return 1;
         if (c >= 0x400 && c <= 0x52F) return 2;
@@ -40,7 +37,6 @@ final class LexBuilder {
         return 0;
     }
 
-    /** Знак гласной или другой знак слога: в тайском и индийских письменностях он входит в слово. */
     static boolean mark(char c) {
         if (c < 0x900) return false;
         int t = Character.getType(c);
@@ -49,14 +45,16 @@ final class LexBuilder {
 
     private static boolean ok(String w, int script, int rank) {
         int n = w.length();
-        if (n < 1 || n > 24 || (n == 1 && rank > 300)) return false; // одиночные буквы — только самые частые («a», «я»)
+        if (n < 1 || n > 24 || (n == 1 && rank > 300)) return false;
         for (int i = 0; i < n; i++) { char c = w.charAt(i); if (!(Character.isLetter(c) || (script >= 8 && mark(c))) || sc(c) != script) return false; }
         return true;
     }
 
-    /** Возвращает число слов в записанном словаре. */
     static int build(String lang, InputStream txt, int top, File out) throws IOException {
-        final int script = Layouts.script(lang);
+        return build(Layouts.script(lang), txt, top, out);
+    }
+
+    static int build(final int script, InputStream txt, int top, File out) throws IOException {
         BufferedReader br = new BufferedReader(new InputStreamReader(txt, "UTF-8"), 1 << 16);
         ArrayList<String> words = new ArrayList<>(top + 1024);
         HashSet<String> seen = new HashSet<>(top * 2);
@@ -72,7 +70,7 @@ final class LexBuilder {
         for (String w : words) for (int i = 0; i < w.length(); i++) cnt[w.charAt(i)]++;
         ArrayList<Integer> letters = new ArrayList<>();
         for (int c = 0; c < cnt.length; c++) if (cnt[c] > 0) letters.add(c);
-        if (letters.size() > 254) { // слишком много букв: оставляем самые частые, слова с остальными выбрасываем
+        if (letters.size() > 254) {
             final int[] cc = cnt;
             java.util.Collections.sort(letters, new Comparator<Integer>() { @Override public int compare(Integer a, Integer b) { return cc[b] - cc[a]; } });
             boolean[] drop = new boolean[cnt.length];
@@ -85,7 +83,7 @@ final class LexBuilder {
             java.util.Collections.sort(letters);
         }
         final int n = words.size();
-        if (n < 1000) throw new IOException("слишком мало слов: " + n);
+        if (n < 1000) throw new IOException("few " + n);
         final int m = letters.size();
         int[] idx = new int[cnt.length];
         char[] alpha = new char[m];
@@ -112,13 +110,13 @@ final class LexBuilder {
         }
         File tmp = new File(out.getPath() + ".tmp");
         try (DataOutputStream o = new DataOutputStream(new java.io.BufferedOutputStream(new FileOutputStream(tmp), 1 << 16))) {
-            o.writeInt(Lexicon.MAGIC); o.writeInt(n); o.writeInt(total); o.writeInt(pl.size());
+            o.writeInt(MAGIC); o.writeInt(n); o.writeInt(total); o.writeInt(pl.size());
             o.writeByte(m);
             for (char c : alpha) o.writeChar(c);
             o.write(fr);
             pl.writeTo(o);
         }
-        if (!tmp.renameTo(out)) throw new IOException("cannot rename"); // rename на Android заменяет файл атомарно
+        if (!tmp.renameTo(out)) throw new IOException("cannot rename");
         return n;
     }
 }

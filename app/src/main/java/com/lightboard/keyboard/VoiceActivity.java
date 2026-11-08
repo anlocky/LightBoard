@@ -6,7 +6,6 @@ import android.content.pm.PackageManager;
 import android.os.Bundle;
 import android.widget.Toast;
 
-/** Невидимая активность: один раз просит разрешение на микрофон (распознавание речи Google ведёт сама клавиатура). */
 public final class VoiceActivity extends Activity {
     private static volatile boolean granted;
 
@@ -21,8 +20,8 @@ public final class VoiceActivity extends Activity {
     @Override public void onRequestPermissionsResult(int code, String[] perms, int[] res) {
         granted = res.length > 0 && res[0] == PackageManager.PERMISSION_GRANTED;
         if (!granted) {
-            Toast.makeText(this, R.string.mic_needed, Toast.LENGTH_LONG).show();
-            if (!shouldShowRequestPermissionRationale(Manifest.permission.RECORD_AUDIO)) { // система больше не спрашивает: ведём в настройки приложения
+            Toast.makeText(this, KbText.t("Нужен доступ к микрофону для голосового ввода"), Toast.LENGTH_LONG).show();
+            if (!shouldShowRequestPermissionRationale(Manifest.permission.RECORD_AUDIO)) {
                 try { startActivity(new android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:" + getPackageName()))); } catch (RuntimeException ignored) { }
             }
         }

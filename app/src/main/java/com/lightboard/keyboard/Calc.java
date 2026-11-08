@@ -3,7 +3,6 @@ package com.lightboard.keyboard;
 import java.math.BigDecimal;
 import java.math.MathContext;
 
-/** Калькулятор для строки ввода: «12+3*4=» -> «24». Поддерживает + - * / × ÷ ^ %, скобки, дроби с точкой или запятой, sqrt sin cos tan ln log abs, pi и e. */
 final class Calc {
     private final String s;
     private int p, ops;
@@ -12,15 +11,14 @@ final class Calc {
 
     private static boolean ok(char c) { return Character.isLetterOrDigit(c) || "+-*/^%().,× ÷xх".indexOf(c) >= 0; }
 
-    /** Выражение перед курсором (без знака «=») -> результат или null, если там нет вычисляемого выражения. */
     static String solve(CharSequence before) {
         String t = before.toString();
         int end = t.length();
         while (end > 0 && t.charAt(end - 1) == ' ') end--;
         int start = end;
         while (start > 0 && end - start < 80 && ok(t.charAt(start - 1))) start--;
-        for (int i = start; i < end; i++) { // самое длинное выражение справа, которое разбирается
-            if (i > 0 && Character.isLetterOrDigit(t.charAt(i - 1)) && Character.isLetterOrDigit(t.charAt(i))) continue; // не режем слова и числа посередине
+        for (int i = start; i < end; i++) {
+            if (i > 0 && Character.isLetterOrDigit(t.charAt(i - 1)) && Character.isLetterOrDigit(t.charAt(i))) continue;
             String ex = t.substring(i, end).trim();
             if (ex.isEmpty()) continue;
             Calc c = new Calc(ex.replace('×', '*').replace('÷', '/'));
@@ -48,20 +46,20 @@ final class Calc {
     }
 
     private double term() {
-        double v = power();
+        double v = unary();
         for (;;) {
             char c = peek();
-            if (c == 'x' || c == 'х') c = '*'; // 3x4 как умножение
+            if (c == 'x' || c == 'х') c = '*';
             if (c != '*' && c != '/' && c != '%') return v;
             p++; ops++;
-            double r = power();
+            double r = unary();
             v = c == '*' ? v * r : c == '/' ? v / r : v % r;
         }
     }
 
     private double power() {
-        double b = unary();
-        if (peek() == '^') { p++; ops++; return Math.pow(b, power()); }
+        double b = atom();
+        if (peek() == '^') { p++; ops++; return Math.pow(b, unary()); }
         return b;
     }
 
@@ -69,7 +67,7 @@ final class Calc {
         char c = peek();
         if (c == '-') { p++; return -unary(); }
         if (c == '+') { p++; return unary(); }
-        return atom();
+        return power();
     }
 
     private double atom() {

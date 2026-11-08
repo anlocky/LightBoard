@@ -36,6 +36,7 @@ import android.view.inputmethod.InputConnection;
 import android.view.inputmethod.InputMethodManager;
 import android.view.inputmethod.InputMethodSubtype;
 import android.widget.FrameLayout;
+import android.widget.LinearLayout;
 import android.widget.Toast;
 import java.io.File;
 import java.io.IOException;
@@ -56,25 +57,49 @@ public final class LightBoardIme extends InputMethodService implements KeyboardV
 
     private Board kv;
     private View kvView;
-    private boolean gboard;
+    private boolean material;
     private final Theme gtheme = new Theme();
     private FrameLayout root;
     private EmojiView emoji;
-    private ClipView clipPanel;             // панель истории буфера обмена (создаётся при первом открытии)
+    private ClipView clipPanel;
     private boolean clipShown;
     private int clipH, ohApplied = -1;
-    private SideBar side;                   // свободная область рядом с клавиатурой в режиме одной руки
-    private int ohMode;                     // применённый режим одной руки (с учётом ориентации)
-    private AutofillBar autofill;           // чипы автозаполнения Google в полосе подсказок (Android 11+)
-    private boolean toolsOn;                // меню над клавишами открыто
-    private final ClipStore clips = new ClipStore();
-    private int oneHand;                    // 0 выкл, 1 слева, 2 справа
-    private boolean split;                  // разделённая клавиатура
+    private SideBar side;
+    private int ohMode;
+    private AutofillBar autofill;
+    private boolean toolsOn;
+    private final ClipStore clipStore = new ClipStore();
+    private boolean clipsLoaded;
+    private long slowUntil, lockRetryAt;
+    private int lockTries, learnTries;
+    private boolean learnLocked;
+
+    private ClipStore cs() {
+        if (!clipsLoaded) {
+            clipsLoaded = true;
+            if (clipStore.loadFrom(clipFile())) saveClips();
+            String oldClips = state.getString("clips", null);
+            if (oldClips != null) { if (clipStore.size() == 0) clipStore.load(oldClips); saveClips(); state.edit().remove("clips").apply(); }
+            if (clipStore.locked) lockRetryAt = SystemClock.uptimeMillis() + 1500L;
+        } else if (clipStore.locked && SystemClock.uptimeMillis() >= lockRetryAt) {
+            // The key store was busy. Copies made meanwhile stay in memory; they are merged as soon as the file opens.
+            if (clipStore.mergeFrom(clipFile())) {
+                lockTries = 0;
+                saveClips();
+            } else {
+                if (lockTries < 40) lockTries++;
+                lockRetryAt = SystemClock.uptimeMillis() + Math.min(60_000L, 1500L * lockTries);
+            }
+        }
+        return clipStore;
+    }
+    private int oneHand;
+    private boolean split;
     private static final float ONE_HAND_FRAC = 0.8f;
-    private SharedPreferences cfg, state; // cfg — настройки (пишет экран настроек), state — состояние (пишет клавиатура)
+    private SharedPreferences cfg, state;
     private final Runnable trimR = new Runnable() { @Override public void run() { trimMemory(); } };
     private SwipeDecoder swipe;
-    private Blur blur; // только API 31+
+    private Blur blur;
     private ClipboardManager cm;
     private final Theme theme = new Theme();
     private final Handler h = new Handler(Looper.getMainLooper());
@@ -91,77 +116,70 @@ public final class LightBoardIme extends InputMethodService implements KeyboardV
     private EditorInfo ei;
     private boolean emojiShown, bottomBar, darkNow, blurNow, showDigits, showWords = true, addrField;
     private int emojiH;
-    private final StringBuilder wordBuf = new StringBuilder(); // запасной учёт набираемого слова для полей, где нельзя прочитать текст
-    private boolean ru = true, suggestOn, acOn, autoSpace, clipOk, fieldOk = true; // ru — язык словаря (lay.ru); fieldOk — поле допускает подсказки
-    private Layouts.L lay = Layouts.RU;                                          // текущая раскладка; словари только у en и ru
+    private final StringBuilder wordBuf = new StringBuilder();
+    private final Touch tt = new Touch();
+    private View navFill;
+    private LinearLayout inputRoot;
+    private final char[] tmpCh = new char[4];
+    private final float[] tmpD2 = new float[4];
+
+    private void clearWord() { wordBuf.setLength(0); tt.clear(); }
+    private boolean ru = true, suggestOn, acOn, autoSpace, clipOk, fieldOk = true;
+    private Layouts.L lay = Layouts.RU;
     private final Runnable scheduleR = new Runnable() { @Override public void run() { schedule(); } };
     private int shift = OFF;
     private boolean shiftManual;
     private long lastShiftTap, lastSpace;
 
-    // подсказки
     private String prefix = "", lastCorrFor, lastCorr;
     private final String[] shown = new String[3], commit = new String[3], match = new String[3];
     private boolean swipeAlt, swipeAwait;
     private int swipeEnd = -1, swipeLen, swipeInsLen;
     private String clipText;
 
-    // правка набора
-    private char afterPunct;           // последний набранный знак, после которого буква получит пробел
-    private boolean trailAutoSpace;    // последний пробел вставили мы (после слова из свайпа/подсказки)
-    private boolean acArmed;           // можно откатить автоисправление клавишей «стереть»
+    private char afterPunct;
+    private boolean trailAutoSpace;
+    private boolean acArmed;
     private String acOrig, acNew, acTrig;
-    private KeySounds sounds;                           // звуки нажатий (создаются при первом нажатии, если включены)
+    private KeySounds sounds;
     private boolean soundOn;
     private float soundVol = 0.5f;
-    private final Learner learner = new Learner();      // самообучение: слова, пары «слово -> следующее», свои слова
+    private final Learner learner = new Learner();
     private final String[] nxt = new String[3];
-    private boolean ownPruned, calcOn;                  // однократная чистка «своих» слов; калькулятор по «=»
-    private long ohAnimEnd, lastHeal;                             // когда закончится анимация режима одной руки
-    private SysSpell spell;                             // системная проверка орфографии для языков без своего словаря
+    private boolean ownPruned, calcOn;
+    private long ohAnimEnd, lastHeal;
+    private SysSpell spell;
     private Runnable corrJob;
-    private HandlerThread corrThread; private Handler corrH; // фоновый поток для подбора исправления (создаётся при необходимости, гасится вместе с кэшами)
-    private boolean noLearn, capsNeed = true, smsShown, pwdField; // noLearn: поле просит не запоминать (инкогнито); capsNeed: пора спросить у поля про заглавную
+    private HandlerThread corrThread; private Handler corrH;
+    private boolean noLearn, capsNeed = true, smsShown, pwdField;
     private int npadNow;
-    private boolean fieldNoLearn, incoOn, smartDash; // инкогнито: удержание пробела, запоминание не ведётся
-    private Boolean micAvail;                        // есть ли в системе служба распознавания речи (проверяем один раз)
-    private String curPkg, appsRaw = "";             // приложение, в которое печатаем, и разобранные настройки отдельных приложений
+    private boolean fieldNoLearn, incoOn, smartDash;
+    private Boolean micAvail;
+    private String curPkg, appsRaw = "";
     private final java.util.HashMap<String, String[]> appsMap = new java.util.HashMap<>();
-    private android.net.Uri imgUri;                 // недавний скриншот или скопированная картинка в полосе подсказок (в историю не попадает)
+    private android.net.Uri imgUri;
     private android.graphics.Bitmap imgThumb;
-    private int imgLabel;
+    private String imgLabel;
     private final Runnable imgHide = new Runnable() { @Override public void run() { clearImage(); schedule(); } };
     private boolean autoCaps = true, autoPeriod = true;
     private static final long SMS_TTL = 300_000L;
     private long lexVer;
     private boolean lexScanned, soundsLoading;
 
-    // ---------- жизненный цикл ----------
-    @SuppressWarnings("deprecation")
-    private SharedPreferences settingsPrefs() {
-        // MODE_MULTI_PROCESS: экран настроек живёт в другом процессе; так мы подхватываем его изменения.
-        // Работает надёжно только пока у каждого файла один пишущий процесс: «lb» пишут только настройки, «lbs» — только клавиатура
-        // (настройки его лишь читают). Нарушать это правило нельзя: два процесса, пишущих в один файл, затирают друг друга.
-        return getSharedPreferences("lb", MODE_PRIVATE | MODE_MULTI_PROCESS);
-    }
+    /** The settings file; its only writer is PrefsProvider in this process, so this instance is always current. */
+    private SharedPreferences settingsPrefs() { return new SafePrefs(getSharedPreferences("lb", MODE_PRIVATE)); }
 
     @Override public void onCreate() {
         super.onCreate();
         state = getSharedPreferences("lbs", MODE_PRIVATE);
-        if (state.contains("sms_code")) state.edit().remove("sms_code").remove("sms_time").apply(); // код из СМС больше не пишется на диск
+        if (state.contains("sms_code")) state.edit().remove("sms_code").remove("sms_time").apply();
         cfg = settingsPrefs();
-        Layouts.L sl = Layouts.byLang(state.getString("lay", null)); // byLang знает и «общие» языки (kk, vi, bg…), byId — только встроенные
-        if (sl == null) sl = state.contains("ru") ? (state.getBoolean("ru", true) ? Layouts.RU : Layouts.EN) : Layouts.system(); // со старых версий: хранился флаг ru
+        Layouts.L sl = Layouts.byLang(state.getString("lay", null));
+        if (sl == null) sl = state.contains("ru") ? (state.getBoolean("ru", true) ? Layouts.RU : Layouts.EN) : Layouts.system();
         lay = sl; ru = lay.ru;
         swipe = new SwipeDecoder();
         swipe.setLearner(learner);
-        learner.loadUser(state.getString("user_words", ""));
-        learner.loadWords(state.getString("learned", ""));
-        learner.loadPairs(state.getString("pairs", ""));
-        learner.loadOwn(state.getString("own", null)); // null — обновление со старой версии
-        if (clips.loadFrom(clipFile())) saveClips(); // старый файл без шифрования: перезаписываем зашифрованным
-        String oldClips = state.getString("clips", null); // со старых версий буфер лежал в настройках
-        if (oldClips != null) { if (clips.size() == 0) clips.load(oldClips); saveClips(); state.edit().remove("clips").apply(); }
+        loadLearned();
         SmsReceiver.sink = new SmsReceiver.Sink() { @Override public void onCode(String code) { smsShow(code, SMS_TTL); applyStrip(); schedule(); } };
         oneHand = state.getInt("onehand", 0);
         split = state.getBoolean("split", false);
@@ -172,14 +190,13 @@ public final class LightBoardIme extends InputMethodService implements KeyboardV
         }
         cm = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
         if (cm != null) cm.addPrimaryClipChangedListener(clipListener);
-        // (раньше здесь ставился глобальный обработчик падений: он цепочкой держал ссылки на все прежние экземпляры сервиса;
-        // падения и так попадают в logcat системой)
+
     }
 
-    @Override public boolean onEvaluateFullscreenMode() { return false; } // без громоздкого fullscreen-ввода в ландшафте
+    @Override public boolean onEvaluateFullscreenMode() { return false; }
 
     @Override public View onCreateInputView() {
-        gboard = designGboard(); // по умолчанию Material
+        material = designMaterial();
         newBoard();
         if (Build.VERSION.SDK_INT >= 31) {
             try {
@@ -188,33 +205,129 @@ public final class LightBoardIme extends InputMethodService implements KeyboardV
                     @Override public void onBlur(boolean on) { blurNow = on; applyTheme(); }
                 });
                 blur.attach();
-            } catch (RuntimeException e) { Diag.save(this, e); blur = null; } // без размытия клавиатура всё равно работает
+            } catch (RuntimeException e) { Diag.save(this, e); blur = null; }
         }
         root = new FrameLayout(this);
         root.addView(kvView, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         emoji = null; emojiShown = false; clipPanel = null; clipShown = false; side = null; ohApplied = -1; ohMode = 0; autofill = null;
         kv.setSplit(split);
         applyOneHand(false);
-        return root;
+        LinearLayout wrap = new LinearLayout(this);
+        wrap.setOrientation(LinearLayout.VERTICAL);
+        wrap.addView(root, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        navFill = new View(this);
+        navFill.setBackgroundColor(activeTheme().panelBot);
+        wrap.addView(navFill, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0));
+        inputRoot = wrap;
+        if (Build.VERSION.SDK_INT >= 35) {
+            wrap.setOnApplyWindowInsetsListener(new View.OnApplyWindowInsetsListener() {
+                @Override public android.view.WindowInsets onApplyWindowInsets(View v, android.view.WindowInsets in) { fitBottom(in); return in; }
+            });
+            wrap.addOnLayoutChangeListener(new View.OnLayoutChangeListener() {
+                @Override public void onLayoutChange(View v, int l, int t, int r, int b, int ol, int ot, int or, int ob) { fitBottom(null); }
+            });
+        }
+        return wrap;
     }
 
-    /** Настройка отдельного приложения: part 0 дизайн, 1 тема, 2 цвета; "-" — как в общих настройках. Строка разбирается только при изменении. */
-    private String ovr(int part) {
+    private void fitBottom(android.view.WindowInsets unused) {
+        final LinearLayout r = inputRoot;
+        final View fill = navFill;
+        if (r == null || fill == null || Build.VERSION.SDK_INT < 35 || r.getHeight() <= 0) return;
+        android.view.WindowInsets wi = r.getRootWindowInsets();
+        if (wi == null) return;
+        android.graphics.Insets nav = wi.getInsets(android.view.WindowInsets.Type.navigationBars());
+        android.graphics.Insets tap = wi.getInsets(android.view.WindowInsets.Type.tappableElement());
+        int nb = Math.max(nav.bottom, tap.bottom), nl = Math.max(nav.left, tap.left), nr = Math.max(nav.right, tap.right);
+        int pb = nb, pl = nl, pr = nr;
+        if (nb > 0 || nl > 0 || nr > 0) {
+            try {
+                int[] loc = new int[2];
+                r.getLocationOnScreen(loc);
+                android.graphics.Rect screen = ((WindowManager) getSystemService(WINDOW_SERVICE)).getMaximumWindowMetrics().getBounds();
+                pb = Math.max(0, Math.min(nb, loc[1] + r.getHeight() - (screen.height() - nb)));
+                pl = Math.max(0, Math.min(nl, nl - loc[0]));
+                pr = Math.max(0, Math.min(nr, loc[0] + r.getWidth() - (screen.width() - nr)));
+            } catch (RuntimeException ignored) { }
+        }
+        final ViewGroup.LayoutParams lp = fill.getLayoutParams();
+        if (lp.height == pb && r.getPaddingLeft() == pl && r.getPaddingRight() == pr) return;
+        final int b = pb, l = pl, rr = pr;
+        r.post(new Runnable() {
+            @Override public void run() {
+                r.setPadding(l, 0, rr, 0);
+                lp.height = b;
+                fill.setLayoutParams(lp);
+            }
+        });
+    }
+
+    private String[] appEntry() {
         String raw = cfg.getString("apps", "");
-        if (raw.isEmpty() || curPkg == null) return "-";
+        if (raw.isEmpty() || curPkg == null) return null;
         if (!raw.equals(appsRaw)) {
             appsRaw = raw; appsMap.clear();
-            for (String e : raw.split(";")) { String[] f = e.split(":"); if (f.length == 4) appsMap.put(f[0], f); }
+            for (String e : raw.split(";")) { String[] f = e.split(":"); if (f.length == 4 || f.length == 8) appsMap.put(f[0], f); }
         }
-        String[] f = appsMap.get(curPkg);
+        return appsMap.get(curPkg);
+    }
+
+    private String ovr(int part) {
+        String[] f = appEntry();
         return f == null ? "-" : f[part + 1];
     }
+
+    private int colorOf(int idx) {
+        String[] f = appEntry();
+        if (f != null && f.length == 8) {
+            try { return Integer.parseInt(f[4 + idx]); } catch (NumberFormatException ignored) { }
+        }
+        return cfg.getInt(COLOR_KEYS[idx], 0);
+    }
+
+    private static final String[] COLOR_KEYS = {"i_panelHue", "i_panelInt", "i_keyHue", "i_keyInt"};
 
     private String schemeNow() { String o = ovr(2); return o.equals("-") ? cfg.getString("g_material", "auto") : o; }
 
     private boolean micAvailable() {
         if (micAvail == null) micAvail = SpeechRecognizer.isRecognitionAvailable(this);
         return micAvail;
+    }
+
+    private boolean slow() { return SystemClock.uptimeMillis() < slowUntil; }
+
+    /** getTextBeforeCursor with a watchdog: when the target app answers slowly, optional lookups pause for a few seconds. */
+    private CharSequence tb(InputConnection ic, int n) {
+        if (slow()) return null;
+        long t0 = SystemClock.uptimeMillis();
+        CharSequence r;
+        try { r = ic.getTextBeforeCursor(n, 0); }
+        catch (RuntimeException e) { slowUntil = t0 + 3000L; return null; }
+        long t1 = SystemClock.uptimeMillis();
+        if (t1 - t0 > 120L) slowUntil = t1 + 3000L;
+        return r;
+    }
+
+    private CharSequence after(InputConnection ic, int n) {
+        if (slow()) return null;
+        long t0 = SystemClock.uptimeMillis();
+        CharSequence r;
+        try { r = ic.getTextAfterCursor(n, 0); }
+        catch (RuntimeException e) { slowUntil = t0 + 3000L; return null; }
+        long t1 = SystemClock.uptimeMillis();
+        if (t1 - t0 > 120L) slowUntil = t1 + 3000L;
+        return r;
+    }
+
+    private CharSequence selected(InputConnection ic) {
+        if (slow()) return null;
+        long t0 = SystemClock.uptimeMillis();
+        CharSequence r;
+        try { r = ic.getSelectedText(0); }
+        catch (RuntimeException e) { slowUntil = t0 + 3000L; return null; }
+        long t1 = SystemClock.uptimeMillis();
+        if (t1 - t0 > 120L) slowUntil = t1 + 3000L;
+        return r;
     }
 
     private void updNoLearn() { noLearn = fieldNoLearn || incoOn; }
@@ -224,26 +337,23 @@ public final class LightBoardIme extends InputMethodService implements KeyboardV
         incoOn = !incoOn;
         updNoLearn();
         if (kv != null) kv.setIncognito(true, incoOn);
-        android.widget.Toast.makeText(this, incoOn ? R.string.incognito_on : R.string.incognito_off, android.widget.Toast.LENGTH_SHORT).show();
+        android.widget.Toast.makeText(this, KbText.t(incoOn ? "Инкогнито включён" : "Инкогнито выключен"), android.widget.Toast.LENGTH_SHORT).show();
         schedule();
     }
 
-    /** Битое значение в настройках не должно ронять клавиатуру. */
-    private boolean designGboard() {
-        String o = ovr(0); // настройка отдельного приложения важнее общей
-        if (o.equals("gboard")) return true;
-        if (o.equals("ios")) return false;
-        try { return cfg.getString("design", "gboard").equals("gboard"); } catch (ClassCastException e) { return true; }
+    private boolean designMaterial() {
+        String o = ovr(0);
+        if (o.equals("material")) return true;
+        if (Ui.cupertinoId(o)) return false;
+        try { return !Ui.cupertinoId(cfg.getString("design", "material")); } catch (ClassCastException e) { return true; }
     }
 
-    private Theme activeTheme() { return gboard ? gtheme : theme; }
+    private Theme activeTheme() { return material ? gtheme : theme; }
 
-    /** Префикс настроек: у каждого дизайна свои значения. */
-    private String P() { return gboard ? "g_" : "i_"; }
+    private String P() { return material ? "g_" : "i_"; }
 
-    /** Создаёт выбранный дизайн; вся логика ввода общая, различается только View. */
     private void newBoard() {
-        kv = gboard ? new GboardView(this, gtheme) : new KeyboardView(this, theme);
+        kv = material ? new MaterialView(this, gtheme) : new KeyboardView(this, theme);
         kvView = kv.view();
         kv.setListener(this);
         kv.setSwipe(swipe);
@@ -251,26 +361,26 @@ public final class LightBoardIme extends InputMethodService implements KeyboardV
         kv.setBottomBar(bottomBar);
     }
 
-    /** Смена дизайна в настройках: подменяем View, состояние ввода остаётся. */
-    private void swapBoard(boolean toGboard) {
+    private void swapBoard(boolean toMaterial) {
         if (root == null) return;
         if (emoji != null) { root.removeView(emoji); emoji = null; }
         if (clipPanel != null) { root.removeView(clipPanel); clipPanel = null; }
         emojiShown = false; clipShown = false;
         root.removeView(kvView);
-        gboard = toGboard;
+        material = toMaterial;
         newBoard();
         root.addView(kvView, 0, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         kv.setSplit(split);
         ohApplied = -1; applyOneHand(false);
-        theme.set(!darkNow, false, -1); // принудительно пересчитать палитры при следующем applyTheme()
+        theme.set(!darkNow, false, -1);
     }
 
     @Override public void onWindowShown() {
         super.onWindowShown();
         h.removeCallbacks(trimR);
         lastChip = null;
-        if (kv != null) { kv.playEntrance(); kv.setToolsOpen(true); } // пока ничего не набрано, меню раскрыто
+        hideUndo();
+        if (kv != null) { kv.playEntrance(); kv.setToolsOpen(cfg.getBoolean(P() + "toolsauto", true)); }
     }
 
     @Override public void onWindowHidden() {
@@ -279,7 +389,7 @@ public final class LightBoardIme extends InputMethodService implements KeyboardV
         saveLearned();
         flushClips();
         h.removeCallbacks(trimR);
-        h.postDelayed(trimR, 8000); // клавиатура скрыта: через 8 с отдаём память
+        h.postDelayed(trimR, 8000);
     }
 
     @Override public void onTrimMemory(int level) {
@@ -287,9 +397,9 @@ public final class LightBoardIme extends InputMethodService implements KeyboardV
         if (level >= TRIM_MEMORY_BACKGROUND && !isInputViewShown()) trimMemory();
     }
 
-    /** Освобождаем всё, что можно собрать заново: панель эмодзи, словари, кэши. */
     private void trimMemory() {
         if (isInputViewShown()) return;
+        if (spell != null) { spell.close(); spell = null; }
         if (emoji != null && root != null) { root.removeView(emoji); emoji = null; emojiShown = false; }
         if (clipPanel != null && root != null) { root.removeView(clipPanel); clipPanel = null; clipShown = false; }
         if (sounds != null) { sounds.release(); sounds = null; }
@@ -302,14 +412,14 @@ public final class LightBoardIme extends InputMethodService implements KeyboardV
     private void applyTheme() {
         if (kv == null) return;
         boolean changed;
-        if (gboard) { gtheme.setMaterial(this, darkNow, schemeNow()); changed = true; }
-        else changed = theme.set(darkNow, blurNow, cfg.getInt("i_panelPct", 80));
+        if (material) { gtheme.setMaterial(this, darkNow, schemeNow()); changed = true; }
+        else changed = theme.set(darkNow, blurNow, cfg.getInt("i_panelPct", 80), colorOf(0), colorOf(1), colorOf(2), colorOf(3));
         if (changed) {
             kv.themeChanged();
             if (emoji != null) emoji.themeChanged();
             if (clipPanel != null) clipPanel.themeChanged();
             if (side != null) { side.setTheme(activeTheme()); side.themeChanged(); }
-            applyNavBar(darkNow); // системный отступ под цвет подложки клавиатуры
+            applyNavBar(darkNow);
         }
     }
 
@@ -321,21 +431,25 @@ public final class LightBoardIme extends InputMethodService implements KeyboardV
     private void startInputViewImpl(EditorInfo info) {
         curPkg = info.packageName;
         ei = info;
-        cfg = settingsPrefs();
-        boolean wantG = designGboard();
-        if (kv != null && wantG != gboard) swapBoard(wantG);
+        KbText.set(cfg.getString("app_lang", "auto"));
+        boolean wantG = designMaterial();
+        if (kv != null && wantG != material) swapBoard(wantG);
         long rs = cfg.getLong("reset_words", 0L);
-        if (rs > state.getLong("reset_done", 0L)) { // из настроек попросили сбросить личные слова
+        if (rs > state.getLong("reset_done", 0L)) {
             learner.clear();
-            state.edit().remove("learned").remove("pairs").remove("user_words").putLong("reset_done", rs).apply();
+            Vault.barrier(learnFile(), Vault.nextSeq());
+            learnFile().delete();
+            state.edit().remove("learned").remove("pairs").remove("user_words").remove("own").putLong("reset_done", rs).apply();
         }
         long fs = cfg.getLong("forget_stamp", 0L);
-        if (fs > state.getLong("forget_done", 0L)) { // из настроек попросили забыть отдельные слова
+        if (fs > state.getLong("forget_done", 0L)) {
             for (String fw : cfg.getString("forget", "").split(" ")) if (!fw.isEmpty()) learner.forget(fw);
             state.edit().putLong("forget_done", fs).apply();
+            cfg.edit().remove("forget").apply();
         }
-        applyImport(); // данные из файла резервной копии (настройки кладут его в filesDir, мы применяем и удаляем)
-        long lv = cfg.getLong("lex_ver", 0L); // экран настроек увеличивает его после импорта словаря: на диск ходим только тогда
+        if (learnLocked) retryLearn();
+        applyImport();
+        long lv = cfg.getLong("lex_ver", 0L);
         if (!lexScanned || lv != lexVer) { lexScanned = true; lexVer = lv; Lexicon.refreshIfChanged(this); }
         Layouts.L fresh = Layouts.byLang(lay.id);
         if (fresh != null && fresh != lay) lay = fresh;
@@ -349,7 +463,7 @@ public final class LightBoardIme extends InputMethodService implements KeyboardV
         String ot = ovr(1);
         if (!ot.equals("-")) tp = ot;
         darkNow = tp.equals("dark") || (tp.equals("auto") && sysDark);
-        if (blur != null) blur.setWanted(!gboard && cfg.getBoolean("i_blur", true), cfg.getInt("i_blurDp", 20)); // у дизайна Gboard размытия нет
+        if (blur != null) blur.setWanted(!material && cfg.getBoolean("i_blur", true), cfg.getInt("i_blurDp", 20));
         applyTheme();
         applyNavBar(darkNow);
 
@@ -359,15 +473,15 @@ public final class LightBoardIme extends InputMethodService implements KeyboardV
             kv.setBottomBar(bottomBar);
             if (emoji != null) { root.removeView(emoji); emoji = null; emojiShown = false; kvView.setVisibility(View.VISIBLE); kvView.setAlpha(1f); }
         }
-        boolean langKeyOn = cfg.getBoolean(P() + "langkey", false); // по умолчанию выключена
+        boolean langKeyOn = cfg.getBoolean(P() + "langkey", false);
         kv.setLangKey(langKeyOn);
-        kv.setGlobeMode(!langKeyOn && cfg.getBoolean(P() + "globe", false)); // с отдельной клавишей языка эмодзи-клавиша всегда эмодзи
+        kv.setGlobeMode(!langKeyOn && cfg.getBoolean(P() + "globe", false));
         if (emojiShown) hideEmoji(false);
         if (clipShown) hideClips(false);
         settleBoard();
         syncModes();
         kv.setHaptic(cfg.getBoolean(P() + "haptic", true));
-        soundOn = cfg.getBoolean(P() + "sound", false); // по умолчанию звуков нет
+        soundOn = cfg.getBoolean(P() + "sound", false);
         soundVol = cfg.getInt(P() + "soundvol2", 30) / 100f * KeySounds.MAX_GAIN;
         if (soundOn) warmSounds();
         kv.setSpaceCursor(cfg.getBoolean(P() + "spacecursor", true));
@@ -379,57 +493,62 @@ public final class LightBoardIme extends InputMethodService implements KeyboardV
 
         int cls = info.inputType & InputType.TYPE_MASK_CLASS, var = info.inputType & InputType.TYPE_MASK_VARIATION;
         boolean numeric = cls == InputType.TYPE_CLASS_NUMBER || cls == InputType.TYPE_CLASS_PHONE || cls == InputType.TYPE_CLASS_DATETIME;
-        boolean isText = cls == InputType.TYPE_CLASS_TEXT; // вариации у разных классов пересекаются по значениям: сначала смотрим класс
+        boolean isText = cls == InputType.TYPE_CLASS_TEXT;
         boolean password = (isText && (var == InputType.TYPE_TEXT_VARIATION_PASSWORD || var == InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
                 || var == InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD))
                 || (cls == InputType.TYPE_CLASS_NUMBER && var == InputType.TYPE_NUMBER_VARIATION_PASSWORD);
-        // адреса (email, URL): подсказки и исправление есть, но знаки препинания не запускают исправление и пробел не ставится
+
         addrField = isText && (var == InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
                 || var == InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS || var == InputType.TYPE_TEXT_VARIATION_URI);
-        // подсказки, исправление и свайп работают везде, кроме паролей и числовых полей (флаг «без подсказок» игнорируем)
+
         fieldOk = !password && !numeric;
         pwdField = password;
         if (password && listening) stopListening();
-        kv.setMic(cfg.getBoolean(P() + "mic", true) && micAvailable() && !password); // в полях паролей голос не уходит в распознавание
-        fieldNoLearn = (info.imeOptions & EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING) != 0; // поле просит ничего не запоминать
+        kv.setMic(cfg.getBoolean(P() + "mic", true) && micAvailable() && !password);
+        fieldNoLearn = (info.imeOptions & EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING) != 0 || addrField
+                || password || numeric
+                || (isText && (info.inputType & InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS) != 0)
+                || (isText && var == InputType.TYPE_TEXT_VARIATION_PERSON_NAME);
         boolean incoAllowed = cfg.getBoolean("incognito", true);
         if (!incoAllowed) incoOn = false;
         updNoLearn();
         kv.setIncognito(incoAllowed, incoOn);
         smartDash = cfg.getBoolean("smartdash", false);
         capsNeed = true;
-        applyFlags(); // и подсказки, и исправление, и свайп работают только у языков со словарём
+        applyFlags();
         clipOk = !password && cfg.getBoolean(P() + "clip", true);
-        showDigits = cfg.getBoolean(P() + "digits", false); // ряд цифр по умолчанию выключен в обоих дизайнах
+        showDigits = cfg.getBoolean(P() + "digits", false);
         showWords = cfg.getBoolean(P() + "words", true);
-        wordBuf.setLength(0);
+        clearWord();
         checkSms();
         findShot();
 
         kv.setLayout(lay);
-        int npad = 0; // отдельная цифровая клавиатура: 1 PIN/целое число, 4 число со знаком или точкой, 2 телефон, 3 дата/время
+        int npad = 0;
         if (cls == InputType.TYPE_CLASS_PHONE) npad = 2;
         else if (cls == InputType.TYPE_CLASS_DATETIME) npad = 3;
         else if (cls == InputType.TYPE_CLASS_NUMBER) npad = (info.inputType & (InputType.TYPE_NUMBER_FLAG_DECIMAL | InputType.TYPE_NUMBER_FLAG_SIGNED)) == 0 ? 1 : 4;
         kv.setNumpad(npad);
-        kv.setTablet(getResources().getConfiguration().smallestScreenWidthDp >= 600); // планшетная раскладка включается сама
-        kv.setRound(cfg.getInt(P() + "round", Ui.defRound(this, !gboard)));
+        kv.setTablet(getResources().getConfiguration().smallestScreenWidthDp >= 600);
+        kv.setRound(cfg.getInt(P() + "round", Ui.defRound(this, !material)));
         kv.setNumRow(showDigits && !numeric);
         npadNow = npad;
-        applyStrip(); // у цифровой клавиатуры верхней панели нет (кроме случая, когда пришёл код из СМС)
+        applyStrip();
         kv.setKeyBg(cfg.getBoolean(P() + "keybg", true));
         kv.setSwapIcons(cfg.getBoolean(P() + "swapicons", false));
-        kv.setPopup(cfg.getBoolean(P() + "popup", true) && !password); // в паролях буквы над клавишами не показываем
+        kv.setPopup(cfg.getBoolean(P() + "popup", true) && !password);
         kv.setHints(cfg.getBoolean(P() + "hintnum", false), cfg.getBoolean(P() + "hintsym", false));
         kv.setLine(cfg.getBoolean(P() + "trail", true));
         kv.setLogo(cfg.getBoolean("g_logo", false));
         String mp = cfg.getString("g_micpos", "top");
         kv.setMicPos(mp.equals("bottom") ? 1 : mp.equals("both") ? 2 : 0);
+        kv.setMenuSwap(cfg.getBoolean(P() + "menuswap", false));
+        MenuBar.setOrder(cfg.getString("menu_order", MenuOrder.DEFAULT));
         autoCaps = cfg.getBoolean(P() + "autocaps", true);
         autoPeriod = cfg.getBoolean(P() + "autoperiod", true);
         calcOn = cfg.getBoolean("calc", true) && !password;
         kv.setPage(numeric ? 1 : 0);
-        if (lay.own()) Lexicon.preload(this, lay.id, scheduleR); else Lexicon.invalidate(); // у остальных языков словарь не нужен
+        if (lay.own()) Lexicon.preload(this, lay.id, scheduleR); else Lexicon.invalidate();
         if (clipText != null && !chipOk()) clipText = null;
         swipeAlt = false; afterPunct = 0; trailAutoSpace = false; acArmed = false;
         kv.setEnterLabel(enterLabel());
@@ -440,13 +559,18 @@ public final class LightBoardIme extends InputMethodService implements KeyboardV
     @Override public void onFinishInputView(boolean finishingInput) {
         super.onFinishInputView(finishingInput);
         h.removeCallbacks(refreshR);
-        if (autofill != null) autofill.clear(); // чипы автозаполнения относятся к закрытому полю
+        hideUndo();
+        if (autofill != null) autofill.clear();
         if (kv != null) kv.cancelTouches();
     }
 
     @Override public void onUpdateSelection(int oldSs, int oldSe, int newSs, int newSe, int cs, int ce) {
         super.onUpdateSelection(oldSs, oldSe, newSs, newSe, cs, ce);
-        if (newSs != newSe || Math.abs(newSs - oldSs) != 1) capsNeed = true; // курсор прыгнул: заглавная могла измениться
+        if (newSs != newSe || Math.abs(newSs - oldSs) != 1) capsNeed = true;
+        if (undoText != null) {
+            if (undoArm) { undoArm = false; undoCur = newSe; }
+            else if ((newSs != undoCur || newSe != undoCur) && android.os.SystemClock.uptimeMillis() - undoGuard > 450L) hideUndo();
+        }
         if (swipeAlt) {
             if (swipeAwait) { swipeEnd = newSs; swipeAwait = false; }
             else if (newSs != swipeEnd || newSe != swipeEnd) swipeAlt = false;
@@ -456,7 +580,8 @@ public final class LightBoardIme extends InputMethodService implements KeyboardV
 
     @Override public void onComputeInsets(InputMethodService.Insets out) {
         super.onComputeInsets(out);
-        if (kv != null) { // «touch fix» из v0.6 сохранён
+        if (kv != null) {
+            fitBottom(null);
             out.contentTopInsets = 0;
             out.visibleTopInsets = 0;
             out.touchableInsets = InputMethodService.Insets.TOUCHABLE_INSETS_CONTENT;
@@ -469,7 +594,8 @@ public final class LightBoardIme extends InputMethodService implements KeyboardV
         stopCorr();
         stopListening();
         if (sounds != null) { sounds.release(); sounds = null; }
-        saveLearned();
+        saveLearnedNow();
+        if (spell != null) { spell.close(); spell = null; }
         if (blur != null) blur.detach();
         if (cm != null) cm.removePrimaryClipChangedListener(clipListener);
         h.removeCallbacksAndMessages(null);
@@ -479,18 +605,22 @@ public final class LightBoardIme extends InputMethodService implements KeyboardV
     private void applyNavBar(boolean dark) {
         Window w = getWindow().getWindow();
         if (w == null) return;
-        w.setNavigationBarColor(activeTheme().panelBot); // тот же цвет (с той же прозрачностью), что и низ подложки
+        w.setNavigationBarColor(activeTheme().panelBot);
+        if (navFill != null) navFill.setBackgroundColor(activeTheme().panelBot);
         if (Build.VERSION.SDK_INT >= 28) w.setNavigationBarDividerColor(Color.TRANSPARENT);
         if (Build.VERSION.SDK_INT >= 29) w.setNavigationBarContrastEnforced(false);
-        if (Build.VERSION.SDK_INT >= 26) {
-            View dv = w.getDecorView();
-            int ui = dv.getSystemUiVisibility();
-            ui = dark ? (ui & ~View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR) : (ui | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
-            dv.setSystemUiVisibility(ui);
-        }
+        if (Build.VERSION.SDK_INT >= 30) {
+            android.view.WindowInsetsController wc = w.getInsetsController();
+            if (wc != null) wc.setSystemBarsAppearance(dark ? 0 : android.view.WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS, android.view.WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS);
+        } else if (Build.VERSION.SDK_INT >= 26) legacyNavIcons(w.getDecorView(), dark);
     }
 
-    // ---------- буфер обмена ----------
+    @SuppressWarnings("deprecation")
+    private static void legacyNavIcons(View dv, boolean dark) {
+        int ui = dv.getSystemUiVisibility();
+        dv.setSystemUiVisibility(dark ? (ui & ~View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR) : (ui | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR));
+    }
+
     private void readClip() {
         if (cm == null) return;
         boolean chip = cfg.getBoolean(P() + "clip", true), hist = cfg.getBoolean("clip_hist", true);
@@ -499,18 +629,19 @@ public final class LightBoardIme extends InputMethodService implements KeyboardV
             ClipData d = cm.getPrimaryClip();
             if (d == null || d.getItemCount() == 0) return;
             if (d.getDescription() != null && d.getDescription().getExtras() != null
-                    && d.getDescription().getExtras().getBoolean("android.content.extra.IS_SENSITIVE")) return; // пароли из менеджеров паролей не трогаем
+                    && d.getDescription().getExtras().getBoolean("android.content.extra.IS_SENSITIVE")) return;
             final android.net.Uri iu = d.getItemAt(0).getUri();
-            if (iu != null && d.getDescription().hasMimeType("image/*")) { // картинка: только в полосу подсказок, в историю не идёт
-                if (imgAllowed()) bg().post(new Runnable() { @Override public void run() { showImage(iu, R.string.chip_image); } });
+            if (iu != null && d.getDescription().hasMimeType("image/*")) {
+                if (imgAllowed()) bg().post(new Runnable() { @Override public void run() { showImage(iu, KbText.t("Изображение")); } });
                 return;
             }
-            CharSequence t = d.getItemAt(0).getText(); // только текст: coerceToText лез бы в чужие провайдеры на главном потоке
+            CharSequence t = d.getItemAt(0).getText();
             if (t == null) return;
             String s = t.toString().trim();
             if (s.isEmpty()) return;
-            if (hist && !incoOn && !looksSecret(s) && clips.add(s, nowMin())) { clips.expire(nowMin(), clipTtl()); saveClips(); } // в инкогнито буфер не записывается
-            if (!chip || s.length() > 200_000) return; // на панели подсказок доступен и очень длинный текст (в истории — до MAX_LEN)
+            ClipStore store = cs();
+            if (hist && !incoOn && !looksSecret(s) && store.add(s, nowMin())) { store.expire(nowMin(), clipTtl()); saveClips(); }
+            if (!chip || s.length() > 200_000) return;
             smsShown = false;
             clipText = s;
             h.removeCallbacks(clipHide);
@@ -519,40 +650,53 @@ public final class LightBoardIme extends InputMethodService implements KeyboardV
         } catch (RuntimeException ignored) { }
     }
 
-    /** Похоже на пароль или одноразовый код: на диск в историю не пишем (чип в подсказках работает как обычно). */
+    private static final java.util.regex.Pattern JWT = java.util.regex.Pattern.compile("[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]*");
+
     private static boolean looksSecret(String s) {
         int n = s.length();
+        if (n >= 20 && (s.contains("PRIVATE KEY") || s.contains("-----BEGIN"))) return true;
+        if (n >= 30 && n <= 4000 && JWT.matcher(s).matches()) return true;
+        if (n >= 35 && n <= 300 && seedPhrase(s)) return true;
         if (n < 4 || n > 64) return false;
         boolean lo = false, up = false, dg = false, sy = false;
         for (int i = 0; i < n; i++) {
             char c = s.charAt(i);
-            if (Character.isWhitespace(c) || c == '@' || c == '/') return false; // почта, пути и ссылки — не секрет
+            if (Character.isWhitespace(c) || c == '@' || c == '/') return false;
             if (Character.isDigit(c)) dg = true; else if (Character.isLowerCase(c)) lo = true; else if (Character.isUpperCase(c)) up = true; else sy = true;
         }
-        if (dg && !lo && !up && !sy) return n <= 8; // PIN, код из СМС
-        return n >= 8 && ((lo ? 1 : 0) + (up ? 1 : 0) + (dg ? 1 : 0) + (sy ? 1 : 0)) >= 3;
+        if (dg && !lo && !up && !sy) return n <= 8;
+        return n >= 6 && ((lo ? 1 : 0) + (up ? 1 : 0) + (dg ? 1 : 0) + (sy ? 1 : 0)) >= 3;
+    }
+
+    /** 12/15/18/21/24 short lowercase Latin words separated by single spaces: a wallet recovery phrase. */
+    private static boolean seedPhrase(String s) {
+        String[] w = s.split(" ", -1);
+        if (w.length < 12 || w.length > 24 || w.length % 3 != 0) return false;
+        for (String x : w) {
+            if (x.length() < 3 || x.length() > 8) return false;
+            for (int i = 0; i < x.length(); i++) { char c = x.charAt(i); if (c < 'a' || c > 'z') return false; }
+        }
+        return true;
     }
 
     private static long nowMin() { return System.currentTimeMillis() / 60000L; }
 
-    private int clipTtl() { return Math.max(1, cfg.getInt("clip_days", ClipStore.DEFAULT_DAYS)) * 1440; } // дней -> минут
+    private int clipTtl() { return Math.max(1, cfg.getInt("clip_days", ClipStore.DEFAULT_DAYS)) * 1440; }
 
-    // ---------- недавние скриншоты и скопированные картинки ----------
     private boolean imgAllowed() {
         return cfg.getBoolean("shots", false) && !pwdField && Pics.accepts(ei)
-                && checkSelfPermission(android.Manifest.permission.READ_EXTERNAL_STORAGE) == android.content.pm.PackageManager.PERMISSION_GRANTED;
+                && checkSelfPermission(Pics.imagesPermission()) == android.content.pm.PackageManager.PERMISSION_GRANTED;
     }
 
     private void findShot() {
         if (imgUri != null || !imgAllowed()) return;
         bg().post(new Runnable() { @Override public void run() {
             android.net.Uri u = Pics.latestScreenshot(LightBoardIme.this);
-            if (u != null) showImage(u, R.string.chip_screenshot);
+            if (u != null) showImage(u, KbText.t("Скриншот"));
         } });
     }
 
-    /** Из фонового потока: миниатюру готовим там, на экран выводим в главном. */
-    private void showImage(final android.net.Uri u, final int label) {
+    private void showImage(final android.net.Uri u, final String label) {
         final android.graphics.Bitmap b = Pics.thumb(this, u);
         if (b == null) return;
         h.post(new Runnable() { @Override public void run() {
@@ -566,13 +710,72 @@ public final class LightBoardIme extends InputMethodService implements KeyboardV
 
     private File clipFile() { return new File(getFilesDir(), "clips.dat"); }
 
-    private boolean clipsDirty;
+    private volatile boolean clipsDirty;
+    private static final long UNDO_MS = 10000L;
+    private String undoText;
+    private boolean undoInserted, undoRedo, undoArm;
+    private int undoCur;
+    private long undoGuard, lastDelAt;
+    private int delRun;
+    private final StringBuilder delBuf = new StringBuilder();
+    private final Runnable undoHide = new Runnable() { @Override public void run() { hideUndo(); } };
+
+    private void showUndo(String text, boolean inserted) {
+        if (kv == null || text == null || text.isEmpty() || pwdField || incoOn || !cfg.getBoolean("undobtn", true)) return;
+        undoText = text; undoInserted = inserted; undoRedo = false; undoArm = true; undoCur = -1;
+        undoGuard = android.os.SystemClock.uptimeMillis();
+        publishUndo();
+        h.removeCallbacks(undoHide);
+        h.postDelayed(undoHide, UNDO_MS);
+    }
+
+    private void publishUndo() {
+        if (kv == null) return;
+        if (toolsOn) kv.setToolsOpen(false);
+        kv.setUndo(KbText.t(undoRedo ? "Вернуть" : "Отменить"), undoRedo);
+    }
+
+    private void hideUndo() {
+        h.removeCallbacks(undoHide);
+        delBuf.setLength(0);
+        delRun = 0;
+        if (undoText == null) return;
+        undoText = null;
+        if (kv != null) kv.setUndo(null, false);
+    }
+
+    private void noteDeleted(String s) {
+        if (pwdField || incoOn) return;
+        long now = android.os.SystemClock.uptimeMillis();
+        if (now - lastDelAt > 130L) { delBuf.setLength(0); delRun = 0; }
+        lastDelAt = now;
+        delBuf.insert(0, s);
+        delRun++;
+        if (delRun >= 4) showUndo(delBuf.toString(), false);
+    }
+
+    @Override public void onUndo() {
+        InputConnection ic = getCurrentInputConnection();
+        String t = undoText;
+        if (ic == null || t == null) { hideUndo(); return; }
+        boolean ok = true;
+        ic.beginBatchEdit();
+        if (undoInserted) {
+            CharSequence b = tb(ic, t.length());
+            if (b != null && t.contentEquals(b)) ic.deleteSurroundingText(t.length(), 0); else ok = false;
+        } else ic.commitText(t, 1);
+        ic.endBatchEdit();
+        if (!ok) { hideUndo(); return; }
+        resetFlags();
+        undoInserted = !undoInserted; undoRedo = !undoRedo; undoArm = true; undoCur = -1;
+        undoGuard = android.os.SystemClock.uptimeMillis();
+        publishUndo();
+        h.removeCallbacks(undoHide);
+        h.postDelayed(undoHide, UNDO_MS);
+        schedule();
+    }
     private String lastChip;
 
-    /**
-     * Чип над клавишами (скопированный текст, скриншот, картинка, код из СМС). Когда он появляется, меню над клавишами сворачивается:
-     * иначе оно закрывает то, что клавиатура хочет предложить. Дальше меню можно открыть вручную, повторно оно не закроется.
-     */
     private void setChip(String chip) {
         if (kv == null) return;
         if (chip != null && !chip.equals(lastChip) && toolsOn) kv.setToolsOpen(false);
@@ -581,36 +784,45 @@ public final class LightBoardIme extends InputMethodService implements KeyboardV
     }
     private final Runnable saveClipsR = new Runnable() { @Override public void run() { flushClips(); } };
 
-    /** Запись истории откладывается на секунду и идёт в фоне: шифрование через Keystore не должно занимать главный поток при каждом копировании. */
-    private void saveClips() { clipsDirty = true; h.removeCallbacks(saveClipsR); h.postDelayed(saveClipsR, 1000); }
+    private void saveClips() { if (clipStore.locked) return; clipsDirty = true; h.removeCallbacks(saveClipsR); h.postDelayed(saveClipsR, 1000); }
+
+    private void wipeClips() {
+        clipStore.clearAll();
+        clipStore.locked = false;
+        clipsLoaded = true;
+        clipsDirty = false;
+        h.removeCallbacks(saveClipsR);
+        File f = clipFile();
+        Vault.barrier(f, Vault.nextSeq());
+        f.delete();
+        new File(f.getPath() + ".tmp").delete();
+    }
 
     private void flushClips() {
         h.removeCallbacks(saveClipsR);
-        if (!clipsDirty) return;
+        if (!clipsDirty || clipStore.locked) return;
         clipsDirty = false;
         try {
-            final byte[] snap = clips.snapshot();
+            final byte[] snap = clipStore.snapshot();
             final File f = clipFile();
-            bg().post(new Runnable() { @Override public void run() { try { ClipStore.write(f, snap); } catch (IOException ignored) { } } });
+            final long q = Vault.nextSeq();
+            bg().post(new Runnable() { @Override public void run() { try { ClipStore.write(f, snap, q); } catch (IOException ignored) { clipsDirty = true; } } });
         } catch (IOException ignored) { }
     }
 
-    private void flushClipsNow() { // при закрытии службы: потока уже может не быть
+    private void flushClipsNow() {
         h.removeCallbacks(saveClipsR);
-        if (!clipsDirty) return;
+        if (!clipsDirty || clipStore.locked) return;
         clipsDirty = false;
-        try { ClipStore.write(clipFile(), clips.snapshot()); } catch (IOException ignored) { }
+        try { ClipStore.write(clipFile(), clipStore.snapshot(), Vault.nextSeq()); } catch (IOException ignored) { }
     }
 
-    /** Чип показываем и для кода из СМС, даже если «Буфер обмена в подсказках» выключен (но не в полях паролей). */
     private boolean chipOk() { return clipOk || (smsShown && !pwdField); }
 
-    /** Длинный текст чипу целиком не нужен: рисуется только начало, а вставляется полный clipText. */
     private static String preview(String s) { return s.length() > 160 ? s.substring(0, 160) : s; }
 
     private void applyStrip() { if (kv != null) kv.setShowWords(showWords && (npadNow == 0 || (smsShown && !pwdField))); }
 
-    // ---------- код из СМС ----------
     private void smsShow(String code, long ttl) {
         if (!cfg.getBoolean("sms", false)) return;
         clipText = code; smsShown = true;
@@ -619,14 +831,14 @@ public final class LightBoardIme extends InputMethodService implements KeyboardV
     }
 
     private void checkSms() {
-        String code = SmsReceiver.fresh(SMS_TTL); // только в памяти процесса; устаревший код сам стирается
+        String code = SmsReceiver.fresh(SMS_TTL);
         if (code != null && !smsShown) smsShow(code, SMS_TTL - SmsReceiver.age());
     }
 
     private void clearSmsStore() { SmsReceiver.clear(); }
 
     @Override public void onClipTap(boolean dismiss) {
-        if (imgUri != null) { // картинка в подсказках: нажатие вставляет, крестик убирает
+        if (imgUri != null) {
             InputConnection pic = getCurrentInputConnection();
             if (!dismiss && pic != null) Pics.commit(this, pic, imgUri);
             clearImage(); schedule();
@@ -638,22 +850,24 @@ public final class LightBoardIme extends InputMethodService implements KeyboardV
         if (smsShown) { smsShown = false; clearSmsStore(); applyStrip(); }
         if (!dismiss && t != null) {
             InputConnection ic = getCurrentInputConnection();
-            if (ic != null) { resetFlags(); ic.commitText(t, 1); }
+            if (ic != null) { resetFlags(); ic.commitText(t, 1); showUndo(t, true); }
         }
         schedule();
     }
 
-    // ---------- действия клавиш ----------
-    private void resetFlags() { capsNeed = true; swipeAlt = false; acArmed = false; afterPunct = 0; trailAutoSpace = false; wordBuf.setLength(0); }
+    private void resetFlags() { capsNeed = true; swipeAlt = false; acArmed = false; afterPunct = 0; trailAutoSpace = false; clearWord(); }
 
-    @Override public void onChar(String s) {
-        if (toolsOn && kv != null) kv.setToolsOpen(false); // началась печать: меню сворачивается и освобождает панель подсказок
+    @Override public void onChar(String s) { try { onCharImpl(s); } catch (RuntimeException e) { Diag.save(this, e); } }
+
+    private void onCharImpl(String s) {
+        lastFin = null;
+        if (toolsOn && kv != null) kv.setToolsOpen(false);
         InputConnection ic = getCurrentInputConnection();
         if (ic == null) return;
         boolean letters = kv.getPage() == 0;
         String out = (shift != OFF && letters) ? lay.upperKeep(s) : s;
-        if (smartDash && out.length() == 1 && out.charAt(0) == '-') { // «умное тире»: после пробела или в начале строки дефис становится тире
-            CharSequence pb = ic.getTextBeforeCursor(1, 0);
+        if (smartDash && out.length() == 1 && out.charAt(0) == '-') {
+            CharSequence pb = tb(ic, 1);
             if (pb == null || pb.length() == 0 || pb.charAt(0) == ' ' || pb.charAt(0) == '\n') out = "\u2014";
         }
         char c0 = out.charAt(0);
@@ -662,8 +876,8 @@ public final class LightBoardIme extends InputMethodService implements KeyboardV
 
         if (isPunct) {
             boolean corrected = !addrField && tryAutocorrect(ic, out);
-            if (trailAutoSpace) { // «слово␣» + «.» -> «слово.»
-                CharSequence b = ic.getTextBeforeCursor(1, 0);
+            if (trailAutoSpace) {
+                CharSequence b = tb(ic, 1);
                 if (b != null && b.length() == 1 && b.charAt(0) == ' ') ic.deleteSurroundingText(1, 0);
             }
             ic.commitText(out, 1);
@@ -676,30 +890,32 @@ public final class LightBoardIme extends InputMethodService implements KeyboardV
             ic.commitText(out, 1);
             afterPunct = 0; trailAutoSpace = false; acArmed = false;
         }
-        if (calcOn && out.equals("=")) { // «12+3*4=» -> «12+3*4=24»
-            CharSequence cb = ic.getTextBeforeCursor(81, 0);
+        if (calcOn && out.equals("=")) {
+            CharSequence cb = tb(ic, 81);
             String res = cb == null || cb.length() < 2 ? null : Calc.solve(cb.subSequence(0, cb.length() - 1));
             if (res != null) ic.commitText(res, 1);
         }
-        if (!pwdField && !isPunct && out.length() == 1 && Character.isLetter(out.charAt(0))) wordBuf.append(out); else wordBuf.setLength(0);
+        if (!pwdField && !isPunct && out.length() == 1 && Character.isLetter(out.charAt(0))) {
+            wordBuf.append(out);
+            tt.push(Character.toLowerCase(out.charAt(0)), tmpCh, tmpD2, kv.lastTouch(tmpCh, tmpD2));
+        } else clearWord();
         if (shift == ON && letters) { shift = OFF; kv.setShift(OFF); }
         shiftManual = false;
         if (out.length() != 1 || !Character.isLetterOrDigit(out.charAt(0))) capsNeed = true;
         schedule();
     }
 
-    /** После «слово.» или «слово,» следующая буква получает пробел перед собой (и заглавную после точки). */
     private String autoSpaceBefore(InputConnection ic, String out) {
         char p = afterPunct;
         afterPunct = 0;
-        CharSequence b = ic.getTextBeforeCursor(3, 0);
+        CharSequence b = tb(ic, 3);
         if (b == null || b.length() < 2 || b.charAt(b.length() - 1) != p) return out;
         char before = b.charAt(b.length() - 2);
         boolean doIt;
         if (p == ',') {
             doIt = !Character.isDigit(before) && before != ' ';
         } else {
-            // точку, двоеточие и т.д. считаем концом предложения только после настоящего слова (не «т.е», не «сайт.ру»)
+
             boolean longWord = b.length() >= 3 && Learner.wordChar(b.charAt(b.length() - 3));
             doIt = Character.isLetter(before) && longWord && wordBeforeIsKnown(ic);
         }
@@ -713,24 +929,30 @@ public final class LightBoardIme extends InputMethodService implements KeyboardV
     private boolean wordBeforeIsKnown(InputConnection ic) {
         Lexicon lex = Lexicon.peek(lay.id);
         if (lex == null || lex.n < 15000) return false;
-        CharSequence b = ic.getTextBeforeCursor(34, 0);
+        CharSequence b = tb(ic, 34);
         if (b == null) return false;
-        int e = b.length() - 1, s = e; // e указывает на знак
+        int e = b.length() - 1, s = e;
         while (s > 0 && Learner.wordChar(b.charAt(s - 1))) s--;
         if (e - s < 2) return false;
         String w = b.subSequence(s, e).toString().toLowerCase(Locale.ROOT);
         return lex.contains(w) || learner.isUser(w);
     }
 
-    @Override public void onBack() {
+    @Override public void onBack() { try { onBackImpl(); } catch (RuntimeException e) { Diag.save(this, e); } }
+
+    private void onBackImpl() {
         InputConnection ic = getCurrentInputConnection();
         if (ic == null) return;
         capsNeed = true;
-        if (acArmed && acNew != null) { // откат автоисправления: возвращаем слово как набрано и запоминаем его
+        if (lastFin != null) {
+            if (SystemClock.uptimeMillis() - lastFinAt > 8000L) lastFin = null;
+            else if (++delSince >= lastFin.length() + 1) { learner.demote(lastFin); lastFin = null; }
+        }
+        if (acArmed && acNew != null) {
             acArmed = false;
             String was = acNew + acTrig;
-            CharSequence tail = ic.getTextBeforeCursor(was.length(), 0);
-            if (tail != null && was.contentEquals(tail)) { // курсор мог уйти в другое место: тогда откатывать нельзя, сотрёт чужой текст
+            CharSequence tail = tb(ic, was.length());
+            if (tail != null && was.contentEquals(tail)) {
                 ic.deleteSurroundingText(was.length(), 0);
                 ic.commitText(acOrig + acTrig, 1);
                 learn(acOrig.toLowerCase(Locale.ROOT));
@@ -738,23 +960,28 @@ public final class LightBoardIme extends InputMethodService implements KeyboardV
                 return;
             }
         }
-        if (swipeAlt && swipeInsLen > 0) { // сразу после непрерывного ввода одно нажатие стирает слово целиком
+        if (swipeAlt && swipeInsLen > 0) {
+            CharSequence sw = tb(ic, swipeInsLen);
             ic.deleteSurroundingText(swipeInsLen, 0);
+            if (sw != null && sw.length() == swipeInsLen) showUndo(sw.toString(), false);
             swipeAlt = false; swipeInsLen = 0; afterPunct = 0; trailAutoSpace = false;
             schedule();
             return;
         }
         swipeAlt = false; afterPunct = 0; trailAutoSpace = false;
-        if (wordBuf.length() > 0) wordBuf.setLength(wordBuf.length() - 1);
-        CharSequence sel = ic.getSelectedText(0);
+        if (wordBuf.length() > 0) { wordBuf.setLength(wordBuf.length() - 1); tt.pop(); }
+        CharSequence sel = selected(ic);
         if (sel != null && sel.length() > 0) {
+            String removed = sel.toString();
             ic.commitText("", 1);
+            showUndo(removed, false);
         } else {
-            CharSequence b = ic.getTextBeforeCursor(2, 0);
+            CharSequence b = tb(ic, 2);
             if (b == null) { sendDownUpKeyEvents(KeyEvent.KEYCODE_DEL); }
             else {
                 int n = (b.length() == 2 && Character.isHighSurrogate(b.charAt(0)) && Character.isLowSurrogate(b.charAt(1))) ? 2 : 1;
                 ic.deleteSurroundingText(n, 0);
+                if (b.length() >= n) noteDeleted(b.subSequence(b.length() - n, b.length()).toString());
             }
         }
         schedule();
@@ -763,7 +990,7 @@ public final class LightBoardIme extends InputMethodService implements KeyboardV
     @Override public void onShift() {
         long now = SystemClock.uptimeMillis();
         if (shift == LOCK) shift = OFF;
-        else if (shift == ON && now - lastShiftTap < 350) shift = LOCK; // двойной тап = Caps Lock
+        else if (shift == ON && now - lastShiftTap < 350) shift = LOCK;
         else if (shift == ON) shift = OFF;
         else shift = ON;
         shiftManual = true;
@@ -771,7 +998,9 @@ public final class LightBoardIme extends InputMethodService implements KeyboardV
         kv.setShift(shift);
     }
 
-    @Override public void onSpace() {
+    @Override public void onSpace() { try { onSpaceImpl(); } catch (RuntimeException e) { Diag.save(this, e); } }
+
+    private void onSpaceImpl() {
         InputConnection ic = getCurrentInputConnection();
         if (ic == null) return;
         capsNeed = true;
@@ -779,8 +1008,8 @@ public final class LightBoardIme extends InputMethodService implements KeyboardV
         boolean dbl = now - lastSpace < 400;
         lastSpace = now;
         swipeAlt = false; afterPunct = 0; trailAutoSpace = false;
-        if (dbl && autoPeriod) { // двойной пробел -> ". "
-            CharSequence b = ic.getTextBeforeCursor(2, 0);
+        if (dbl && autoPeriod) {
+            CharSequence b = tb(ic, 2);
             if (b != null && b.length() == 2 && b.charAt(1) == ' ' && Character.isLetterOrDigit(b.charAt(0))) {
                 ic.deleteSurroundingText(1, 0);
                 ic.commitText(". ", 1);
@@ -790,7 +1019,7 @@ public final class LightBoardIme extends InputMethodService implements KeyboardV
             }
         }
         boolean corrected = tryAutocorrect(ic, " ");
-        wordBuf.setLength(0);
+        clearWord();
         ic.commitText(" ", 1);
         acArmed = corrected;
         if (corrected) acTrig = " ";
@@ -798,7 +1027,9 @@ public final class LightBoardIme extends InputMethodService implements KeyboardV
         schedule();
     }
 
-    @Override public void onEnter() {
+    @Override public void onEnter() { try { onEnterImpl(); } catch (RuntimeException e) { Diag.save(this, e); } }
+
+    private void onEnterImpl() {
         InputConnection ic = getCurrentInputConnection();
         if (ic == null) return;
         capsNeed = true;
@@ -807,49 +1038,47 @@ public final class LightBoardIme extends InputMethodService implements KeyboardV
             int a = ei.imeOptions & EditorInfo.IME_MASK_ACTION;
             boolean noAction = (ei.imeOptions & EditorInfo.IME_FLAG_NO_ENTER_ACTION) != 0;
             if (!noAction && a != EditorInfo.IME_ACTION_NONE && a != EditorInfo.IME_ACTION_UNSPECIFIED) {
-                tryAutocorrect(ic, "", false); // Enter/поиск: слово не меняем
-                wordBuf.setLength(0);
+                tryAutocorrect(ic, "", false);
+                clearWord();
                 ic.performEditorAction(a);
                 return;
             }
         }
         tryAutocorrect(ic, "\n", false);
-        wordBuf.setLength(0);
+        clearWord();
         sendDownUpKeyEvents(KeyEvent.KEYCODE_ENTER);
         acArmed = false;
     }
 
-    // ---------- автоисправление ----------
-    private void learn(String low) { if (!noLearn) learner.learnUser(low); } // сохранится при скрытии клавиатуры
+    private void learn(String low) { if (!noLearn) learner.learnUser(low); }
 
-    /** Слово дошло до конца (пробел, знак): считаем его и запоминаем, что оно шло после предыдущего. */
     private void finish(String fin, CharSequence b, int s) {
         if (noLearn) return;
-        learner.bump(fin, kindOf(fin));
-        if (b == null) return;
+        int k = kindOf(fin);
+        learner.bump(fin, k);
+        lastFin = fin; lastFinAt = SystemClock.uptimeMillis(); delSince = 0;
+        if (b == null || !pairable(k, fin)) return;
         String pv = Learner.prevWord(b, s, 32);
-        if (pv != null) learner.pair(pv, fin);
+        if (pv != null && (pv.isEmpty() || pairable(-1, pv))) learner.pair(pv, fin);
     }
 
-    /** Заменяет только что набранное слово, если его нет в словаре и есть уверенная правка. true — слово заменено. */
     private boolean tryAutocorrect(InputConnection ic, String trigger) { return tryAutocorrect(ic, trigger, true); }
 
-    /** replace=false: слово только запоминается (Enter, поиск), но не заменяется. */
     private boolean tryAutocorrect(InputConnection ic, String trigger, boolean replace) {
-        if (!suggestOn) return false;
+        if (!suggestOn || slow()) return false;
         Lexicon lex = Lexicon.peek(lay.id);
-        boolean canCorrect = acOn && lex != null && lex.n >= 15000; // с маленьким словарём исправлять опасно
-        CharSequence b = ic.getTextBeforeCursor(32, 0);
+        boolean canCorrect = acOn && lex != null && lex.n >= 15000;
+        CharSequence b = tb(ic, 32);
         String w;
-        boolean ctx = b != null && b.length() > 0; // false: приложение не отдаёт текст, берём своё слово
+        boolean ctx = b != null && b.length() > 0;
         int s = 0;
         if (ctx) {
             int e = b.length();
             s = e;
             while (s > 0 && Learner.wordChar(b.charAt(s - 1))) s--;
             if (s == e) return false;
-            if (e - s < 3) { finish(b.subSequence(s, e).toString().toLowerCase(Locale.ROOT), b, s); return false; } // короткие слова не исправляем, но учим
-            if (s > 0) { // слово — часть токена («it's», «a@b», «x.y», «a1») — не трогаем
+            if (e - s < 3) { finish(b.subSequence(s, e).toString().toLowerCase(Locale.ROOT), b, s); return false; }
+            if (s > 0) {
                 char pc = b.charAt(s - 1);
                 if (pc == '\u0301' || pc == '\'' || pc == '@' || pc == '-' || pc == '_' || pc == '/' || pc == '.' || pc == '#' || Character.isDigit(pc)) return false;
             }
@@ -860,42 +1089,43 @@ public final class LightBoardIme extends InputMethodService implements KeyboardV
         }
         if (w.length() > 1 && w.equals(w.toUpperCase(Locale.ROOT))) return false;
         boolean cap = Character.isUpperCase(w.charAt(0));
-        if (cap) { // заглавное слово не в начале предложения — скорее имя
+        if (cap) {
             if (!ctx) return false;
             int k = s - 1;
             while (k >= 0 && b.charAt(k) == ' ') k--;
             boolean start = (k < 0 && b.length() < 32) || (k >= 0 && (SENTENCE_END.indexOf(b.charAt(k)) >= 0 || b.charAt(k) == '\n'));
-            if (!start) { finish(w.toLowerCase(Locale.ROOT), b, s); return false; } // имена тоже запоминаем
+            if (!start) { finish(w.toLowerCase(Locale.ROOT), b, s); return false; }
         }
         String low = w.toLowerCase(Locale.ROOT);
         if (learner.known(low) || !canCorrect || !replace) { finish(low, ctx ? b : null, s); return false; }
-        String corr = low.equals(lastCorrFor) ? lastCorr : lex.correct(low);
+        String corr = lex.autoCorrect(low, 8_000_000L, tt);
         if (corr == null) { finish(low, ctx ? b : null, s); return false; }
         String out = cap ? cap(corr) : corr;
-        if (!ic.deleteSurroundingText(w.length(), 0)) return false; // поле не умеет заменять текст — лучше не трогать
+        if (!ic.deleteSurroundingText(w.length(), 0)) return false;
         ic.commitText(out, 1);
         acOrig = w; acNew = out;
         finish(corr, ctx ? b : null, s);
         return true;
     }
 
-    // ---------- непрерывный ввод ----------
-    @Override public void onSwipe(String[] words, int n) {
+    @Override public void onSwipe(String[] words, int n) { try { onSwipeImpl(words, n); } catch (RuntimeException e) { Diag.save(this, e); } }
+
+    private void onSwipeImpl(String[] words, int n) {
         if (toolsOn && kv != null) kv.setToolsOpen(false);
         InputConnection ic = getCurrentInputConnection();
         if (ic == null || n <= 0) return;
         String w = words[0];
         if (shift == LOCK) w = w.toUpperCase(Locale.ROOT);
         else if (shift == ON) w = cap(w);
-        CharSequence b = ic.getTextBeforeCursor(32, 0);
+        CharSequence b = tb(ic, 32);
         char lc = b != null && b.length() > 0 ? b.charAt(b.length() - 1) : ' ';
         boolean sp = Character.isLetterOrDigit(lc) || PUNCT.indexOf(lc) >= 0;
         ic.commitText((sp ? " " : "") + w + " ", 1);
-        afterPunct = 0; acArmed = false; trailAutoSpace = true; wordBuf.setLength(0); capsNeed = true;
+        afterPunct = 0; acArmed = false; trailAutoSpace = true; clearWord(); capsNeed = true;
         swipeLen = w.length() + 1;
         swipeInsLen = (sp ? 1 : 0) + w.length() + 1;
         observe(b, w.toLowerCase(Locale.ROOT));
-        // остальные варианты — в полосу подсказок: тап заменяет только что вставленное слово
+
         for (int i = 0; i < 3; i++) { shown[i] = null; commit[i] = null; }
         for (int i = 0; i < n; i++) {
             String a = i == 0 ? w : (shift == LOCK ? words[i].toUpperCase(Locale.ROOT) : (shift == ON ? cap(words[i]) : words[i]));
@@ -910,15 +1140,13 @@ public final class LightBoardIme extends InputMethodService implements KeyboardV
         schedule();
     }
 
-    /** Языки, между которыми переключает глобус: список из настроек (по умолчанию английский и язык телефона). */
-    /** Переключение по глобусу идёт по языкам, включённым в системе («Многоязычный ввод»): список один и тот же и там, и здесь. */
     @Override public void onLang() {
         ArrayList<InputMethodSubtype> subs = new ArrayList<>();
         ArrayList<Layouts.L> el = SysLangs.enabled(this, subs);
         if (el.isEmpty()) return;
         int j = (el.indexOf(lay) + 1) % el.size();
         switchTo(el.get(j));
-        if (Build.VERSION.SDK_INT >= 28 && j < subs.size()) { // сообщаем системе, какой язык теперь выбран
+        if (Build.VERSION.SDK_INT >= 28 && j < subs.size()) {
             try { switchInputMethod(new ComponentName(this, LightBoardIme.class).flattenToShortString(), subs.get(j)); } catch (RuntimeException ignored) { }
         }
     }
@@ -932,10 +1160,10 @@ public final class LightBoardIme extends InputMethodService implements KeyboardV
 
     private void switchTo(Layouts.L l) {
         if (l == null || kv == null) return;
-        if (l.id.equals(lay.id)) { if (l != lay) { lay = l; kv.setLayout(l); } return; } // тот же язык: только обновить объект раскладки
+        if (l.id.equals(lay.id)) { if (l != lay) { lay = l; kv.setLayout(l); } return; }
         lay = l; ru = l.ru;
         state.edit().putString("lay", l.id).apply();
-        kv.setLayout(l); lastCorrFor = null; wordBuf.setLength(0);
+        kv.setLayout(l); lastCorrFor = null; clearWord();
         applyFlags();
         if (l.own()) Lexicon.preload(this, lay.id, scheduleR); else Lexicon.invalidate();
         schedule();
@@ -946,10 +1174,9 @@ public final class LightBoardIme extends InputMethodService implements KeyboardV
         if (longPress == globe) showEmoji(); else onLang();
     }
 
-    // ---------- голосовой ввод: системный распознаватель (Google), текст вставляется прямо из клавиатуры ----------
     private SpeechRecognizer sr;
     private boolean listening;
-    private final Runnable startListenR = new Runnable() { @Override public void run() { startListening(); } };
+    private final Runnable startListenR = new Runnable() { @Override public void run() { if (!pwdField) startListening(); } };
 
     @Override public void onMic() {
         if (listening) stopListening(); else startListening();
@@ -963,21 +1190,20 @@ public final class LightBoardIme extends InputMethodService implements KeyboardV
         } catch (RuntimeException e) { Diag.save(this, e); }
     }
 
-    /** Android 12+: сначала распознаватель на устройстве (звук не уходит в сеть); нет языкового пакета — обычный системный. */
     private void startListening() {
-        startListening(Build.VERSION.SDK_INT >= 31 && SpeechRecognizer.isOnDeviceRecognitionAvailable(this));
+        startListening(Build.VERSION.SDK_INT >= 31 && SpeechRecognizer.isOnDeviceRecognitionAvailable(this) ? 0 : 1);
     }
 
-    private void startListening(final boolean onDevice) {
+    private void startListening(final int mode) {
         if (kv == null) return;
-        if (sr != null) stopListening(); // предыдущий распознаватель не бросаем
+        if (sr != null) stopListening();
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) { openMicPermission(); return; }
         if (!SpeechRecognizer.isRecognitionAvailable(this)) {
-            Toast.makeText(this, R.string.speech_unavailable, Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, KbText.t("Распознавание речи недоступно"), Toast.LENGTH_SHORT).show();
             return;
         }
         try {
-            sr = onDevice ? SpeechRecognizer.createOnDeviceSpeechRecognizer(this) : SpeechRecognizer.createSpeechRecognizer(this);
+            sr = mode == 0 ? SpeechRecognizer.createOnDeviceSpeechRecognizer(this) : SpeechRecognizer.createSpeechRecognizer(this);
             sr.setRecognitionListener(new RecognitionListener() {
                 @Override public void onReadyForSpeech(Bundle p) { }
                 @Override public void onBeginningOfSpeech() { }
@@ -997,21 +1223,21 @@ public final class LightBoardIme extends InputMethodService implements KeyboardV
                 }
                 @Override public void onError(int code) {
                     stopListening();
-                    if (onDevice && (code == 12 || code == 13)) { startListening(false); return; } // ERROR_LANGUAGE_NOT_SUPPORTED / UNAVAILABLE: пакета языка на устройстве нет
+                    if ((code == 12 || code == 13) && mode < 2) { startListening(mode + 1); return; }
                     if (code == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) openMicPermission();
+                    else if (code == 12 || code == 13) Toast.makeText(LightBoardIme.this, KbText.t("Распознаватель речи не поддерживает этот язык"), Toast.LENGTH_SHORT).show();
                     else if (code != SpeechRecognizer.ERROR_NO_MATCH && code != SpeechRecognizer.ERROR_SPEECH_TIMEOUT)
-                        Toast.makeText(LightBoardIme.this, getString(R.string.speech_error, code), Toast.LENGTH_SHORT).show();
+                        Toast.makeText(LightBoardIme.this, String.format(KbText.t("Ошибка распознавания: %d"), code), Toast.LENGTH_SHORT).show();
                 }
             });
             Intent i = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
             i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
-            i.putExtra(RecognizerIntent.EXTRA_LANGUAGE, lay.tag);
+            if (mode < 2) i.putExtra(RecognizerIntent.EXTRA_LANGUAGE, lay.tag);
             i.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
-            i.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true); // если языковой пакет скачан, обычный распознаватель тоже работает без сети
             i.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1);
             i.putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, getPackageName());
             sr.startListening(i);
-            if (toolsOn) kv.setToolsOpen(false); // идёт диктовка: панель нужна для текста
+            if (toolsOn) kv.setToolsOpen(false);
             listening = true;
             kv.setListening(true);
         } catch (RuntimeException e) { Diag.save(this, e); stopListening(); }
@@ -1027,9 +1253,9 @@ public final class LightBoardIme extends InputMethodService implements KeyboardV
     private void commitSpoken(String v) {
         InputConnection ic = getCurrentInputConnection();
         if (ic == null || v.isEmpty()) return;
-        CharSequence b = ic.getTextBeforeCursor(1, 0);
+        CharSequence b = tb(ic, 1);
         boolean sp = b != null && b.length() == 1 && (Character.isLetterOrDigit(b.charAt(0)) || PUNCT.indexOf(b.charAt(0)) >= 0);
-        if (autoCaps && ei != null && ic.getCursorCapsMode(ei.inputType) != 0) v = cap(v);
+        if (autoCaps && ei != null && !slow() && ic.getCursorCapsMode(ei.inputType) != 0) v = cap(v);
         resetFlags();
         ic.commitText((sp ? " " : "") + v, 1);
         schedule();
@@ -1038,16 +1264,15 @@ public final class LightBoardIme extends InputMethodService implements KeyboardV
     @Override public void onStartInput(EditorInfo attribute, boolean restarting) {
         super.onStartInput(attribute, restarting);
         if (attribute != null) ei = attribute;
-        if (VoiceActivity.takeGranted()) { h.removeCallbacks(startListenR); h.postDelayed(startListenR, 500); } // разрешение только что выдали
+        if (VoiceActivity.takeGranted()) { h.removeCallbacks(startListenR); h.postDelayed(startListenR, 500); }
     }
 
-    /** Системный переключатель раскладок: подхватываем смену подтипа (и при открытии, если система сменила его без уведомления). */
     private void adoptSubtype(InputMethodSubtype st) {
         if (st == null || st.getLocale() == null) return;
         String loc = st.getLocale();
-        if (loc.equals(state.getString("sys_subtype", ""))) return; // с прошлого раза не менялся — оставляем свой выбор языка
+        if (loc.equals(state.getString("sys_subtype", ""))) return;
         state.edit().putString("sys_subtype", loc).apply();
-        switchTo(Layouts.byLang(loc)); // язык подтипа без раскладки игнорируется
+        switchTo(Layouts.byLang(loc));
     }
 
     @Override public void onCurrentInputMethodSubtypeChanged(InputMethodSubtype st) {
@@ -1055,15 +1280,12 @@ public final class LightBoardIme extends InputMethodService implements KeyboardV
         adoptSubtype(st);
     }
 
-    // ---------- жесты ----------
-    /** Tab на планшетной раскладке. */
     @Override public void onSpecial(int keyCode) {
         resetFlags();
         sendDownUpKeyEvents(keyCode);
         schedule();
     }
 
-    /** Caps Lock на планшетной раскладке: включает и выключает постоянные заглавные. */
     @Override public void onCaps() {
         shift = shift == LOCK ? OFF : LOCK;
         shiftManual = true;
@@ -1088,10 +1310,19 @@ public final class LightBoardIme extends InputMethodService implements KeyboardV
         resetFlags();
         ic.beginBatchEdit();
         ic.performContextMenuAction(android.R.id.selectAll);
+        CharSequence all = selected(ic);
+        String gone = all != null && all.length() > 0 ? all.toString() : null;
         ic.commitText("", 1);
-        CharSequence b = ic.getTextBeforeCursor(1, 0), a = ic.getTextAfterCursor(1, 0);
-        if ((b != null && b.length() > 0) || (a != null && a.length() > 0)) ic.deleteSurroundingText(1000000, 1000000);
+        CharSequence b = tb(ic, 1), a = after(ic, 1);
+        if (slow() || (b != null && b.length() > 0) || (a != null && a.length() > 0)) {
+            if (gone == null && !slow()) {
+                CharSequence pb = tb(ic, 5000), pa = after(ic, 5000);
+                gone = (pb == null ? "" : pb.toString()) + (pa == null ? "" : pa.toString());
+            }
+            ic.deleteSurroundingText(1000000, 1000000);
+        }
         ic.endBatchEdit();
+        if (gone != null && !gone.isEmpty()) showUndo(gone, false);
         schedule();
     }
 
@@ -1103,18 +1334,16 @@ public final class LightBoardIme extends InputMethodService implements KeyboardV
         } catch (RuntimeException e) { Diag.save(this, e); }
     }
 
-    /** Вид сообщил о повторном сбое рисования: пересоздаём его (не чаще раза в 3 с). */
     @Override public void onBroken() {
         long now = SystemClock.uptimeMillis();
         if (now - lastHeal < 3000) return;
         lastHeal = now;
-        h.post(new Runnable() { @Override public void run() { swapBoard(gboard); refresh(); } });
+        h.post(new Runnable() { @Override public void run() { swapBoard(material); refresh(); } });
     }
 
-    /** Окончательное состояние вида: прозрачность, видимость, сдвиги не должны оставаться от прерванных анимаций. */
     private void settleBoard() {
         if (kvView == null) return;
-        if (!kv.healthy() && kvView.getWidth() > 0) { swapBoard(gboard); return; } // вид собран неверно — пересоздаём
+        if (!kv.healthy() && kvView.getWidth() > 0) { swapBoard(material); return; }
         if (emojiShown || clipShown) return;
         kvView.animate().cancel();
         kvView.setAlpha(1f); kvView.setVisibility(View.VISIBLE);
@@ -1127,7 +1356,6 @@ public final class LightBoardIme extends InputMethodService implements KeyboardV
         if (autofill != null) { autofill.setHidden(open); if (kv != null) kv.setStripHidden(autofill.has() && !open); }
     }
 
-    /** Автозаполнение: службе нужен размер чипов; без включённой настройки отвечаем «не надо». */
     @Override public InlineSuggestionsRequest onCreateInlineSuggestionsRequest(Bundle uiExtras) {
         if (Build.VERSION.SDK_INT < 30 || cfg == null || kv == null || !cfg.getBoolean("autofill", true)) return null;
         Theme at = activeTheme();
@@ -1139,7 +1367,7 @@ public final class LightBoardIme extends InputMethodService implements KeyboardV
         if (autofill == null) autofill = new AutofillBar(this, root, new AutofillBar.Cb() {
             @Override public void shown(boolean on) {
                 if (kv == null) return;
-                if (on && toolsOn) kv.setToolsOpen(false); // автозаполнение предложило вариант: меню сворачивается
+                if (on && toolsOn) kv.setToolsOpen(false);
                 kv.setStripHidden(on && !toolsOn);
             }
         });
@@ -1150,11 +1378,10 @@ public final class LightBoardIme extends InputMethodService implements KeyboardV
     @Override public void onKeySound(int kind) {
         if (!soundOn) return;
         KeySounds s = sounds;
-        if (s == null) { warmSounds(); return; } // на первом нажатии главный поток не блокируем
+        if (s == null) { warmSounds(); return; }
         s.play(kind, soundVol);
     }
 
-    /** Звуки готовятся в фоне (чтение, синтез, запись файлов), на главный поток возвращается готовый объект. */
     private void warmSounds() {
         if (sounds != null || soundsLoading) return;
         soundsLoading = true;
@@ -1168,7 +1395,6 @@ public final class LightBoardIme extends InputMethodService implements KeyboardV
         } });
     }
 
-    // ---------- меню над клавишами, режимы, история буфера ----------
     @Override public void onMenu(int id) {
         switch (id) {
             case Board.MENU_CLIP: showClips(); break;
@@ -1178,31 +1404,34 @@ public final class LightBoardIme extends InputMethodService implements KeyboardV
         }
     }
 
-    private void setSplitMode(boolean on) {
+    private void setSplitMode(boolean on) { setSplitMode(on, true); }
+
+    private void setSplitMode(boolean on, boolean byUser) {
         split = on;
-        state.edit().putBoolean("split", on).apply();
+        SharedPreferences.Editor ed = state.edit().putBoolean("split", on);
+        if (byUser) ed.putLong("mode_t", System.currentTimeMillis());
+        ed.apply();
         if (kv != null) kv.setSplit(on);
     }
 
-    private void setOneHandMode(int m) {
+    private void setOneHandMode(int m) { setOneHandMode(m, true); }
+
+    private void setOneHandMode(int m, boolean byUser) {
         oneHand = m;
         SharedPreferences.Editor ed = state.edit().putInt("onehand", m);
         if (m != 0) ed.putInt("onehand_side", m);
+        if (byUser) ed.putLong("mode_t", System.currentTimeMillis());
         ed.apply();
         applyOneHand(true);
     }
 
-    /**
-     * Режим одной руки: клавиатура занимает часть ширины и прижимается к краю, рядом — SideBar с кнопками. В ландшафте не применяется.
-     * Переходы анимируются только преобразованием вида (без пересчёта клавиш на каждом кадре): сжатие в угол, расширение, перенос на другую сторону.
-     */
     private void applyOneHand(boolean animate) {
         if (root == null || kv == null) return;
         int total = getResources().getDisplayMetrics().widthPixels;
         boolean land = getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE;
-        int mode = (land && !Ui.tablet(this)) ? 0 : oneHand; // на планшете режим работает и в альбомной ориентации
+        int mode = (land && !Ui.tablet(this)) ? 0 : oneHand;
         kv.setOneHand(oneHand);
-        if (!animate && SystemClock.uptimeMillis() > ohAnimEnd) settleOneHand(mode); // после прерванной анимации не остаётся прозрачных или сдвинутых видов
+        if (!animate && SystemClock.uptimeMillis() > ohAnimEnd) settleOneHand(mode);
         int key = mode == 0 ? 0 : (mode << 20) | total;
         if (key == ohApplied) return;
         int prev = ohMode;
@@ -1237,14 +1466,16 @@ public final class LightBoardIme extends InputMethodService implements KeyboardV
         if (!animate || prev == mode) return;
         final float dist = free;
         ohAnimEnd = SystemClock.uptimeMillis() + 500;
+        h.removeCallbacks(settleR);
+        h.postDelayed(settleR, 560);
         DecelerateInterpolator dec = new DecelerateInterpolator(1.6f);
-        if (prev == 0) { // клавиатура сжимается в угол, рядом выезжает панель
+        if (prev == 0) {
             kvView.setPivotX(mode == 2 ? kw : 0f);
             kvView.setScaleX(1f / ONE_HAND_FRAC);
             kvView.animate().scaleX(1f).setDuration(340).setInterpolator(new OvershootInterpolator(0.8f)).start();
             side.setAlpha(0f); side.setTranslationX(mode == 2 ? -dist * 0.6f : dist * 0.6f);
             side.animate().alpha(1f).translationX(0f).setStartDelay(60).setDuration(300).setInterpolator(dec).start();
-        } else if (mode == 0) { // выход: клавиатура растёт на всю ширину, панель уходит
+        } else if (mode == 0) {
             kvView.setPivotX(prev == 2 ? total : 0f);
             kvView.setScaleX(ONE_HAND_FRAC);
             kvView.animate().scaleX(1f).setDuration(280).setInterpolator(dec).start();
@@ -1254,7 +1485,7 @@ public final class LightBoardIme extends InputMethodService implements KeyboardV
                     @Override public void run() { if (ohMode == 0 && side != null) { side.setVisibility(View.GONE); side.setAlpha(1f); side.setTranslationX(0f); } }
                 }).start();
             }
-        } else { // перенос на другую сторону: клавиатура и панель меняются местами
+        } else {
             kvView.setTranslationX(mode == 2 ? -dist : dist);
             kvView.animate().translationX(0f).setDuration(380).setInterpolator(new OvershootInterpolator(0.7f)).start();
             side.setTranslationX(mode == 2 ? dist : -dist);
@@ -1262,31 +1493,50 @@ public final class LightBoardIme extends InputMethodService implements KeyboardV
         }
     }
 
+    private final Runnable settleR = new Runnable() { @Override public void run() { repairOneHand(); } };
+
+    private void repairOneHand() {
+        if (root == null || kv == null || kvView == null || SystemClock.uptimeMillis() <= ohAnimEnd) return;
+        boolean land = getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE;
+        int mode = (land && !Ui.tablet(this)) ? 0 : oneHand;
+        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) kvView.getLayoutParams();
+        boolean wide = lp.width == ViewGroup.LayoutParams.MATCH_PARENT;
+        if ((mode == 0) != wide || (mode != 0 && side == null)) { ohApplied = -1; applyOneHand(false); return; }
+        if (kvView.getScaleX() != 1f || kvView.getTranslationX() != 0f) { kvView.setScaleX(1f); kvView.setTranslationX(0f); }
+        if (mode != 0 && side != null && (side.getAlpha() != 1f || side.getTranslationX() != 0f || side.getVisibility() != View.VISIBLE)) {
+            side.setAlpha(1f); side.setTranslationX(0f); side.setVisibility(View.VISIBLE);
+        }
+        if (mode == 0 && side != null) { root.removeView(side); side = null; }
+    }
+
     private void settleOneHand(int mode) {
         if (kvView == null) return;
         kvView.setScaleX(1f); kvView.setTranslationX(0f);
         if (side == null) return;
-        if (mode == 0) { root.removeView(side); side = null; return; } // выключено — вид не держим в памяти
+        if (mode == 0) { root.removeView(side); side = null; return; }
         side.animate().cancel(); side.setAlpha(1f); side.setTranslationX(0f); side.setVisibility(View.VISIBLE);
     }
 
-    /** Значения, которые меняют на экране настроек, подхватываются при открытии клавиатуры; кнопки меню переключают на лету. */
     private void syncModes() {
-        String oh = cfg.getString("onehand", null);
-        if (oh != null && !oh.equals(state.getString("onehand_seen", null))) {
-            state.edit().putString("onehand_seen", oh).apply();
-            setOneHandMode("left".equals(oh) ? 1 : "right".equals(oh) ? 2 : 0);
-        }
-        if (cfg.contains("split")) {
-            boolean v = cfg.getBoolean("split", false);
-            if (state.getInt("split_seen", -1) != (v ? 1 : 0)) { state.edit().putInt("split_seen", v ? 1 : 0).apply(); setSplitMode(v); }
+        long cs = cfg.getLong("mode_t", 0L);
+        if (cs > state.getLong("mode_t", 0L)) {
+            String oh = cfg.getString("onehand", "off");
+            int m = "left".equals(oh) ? 1 : "right".equals(oh) ? 2 : 0;
+            boolean sp = cfg.getBoolean("split", false);
+            state.edit().putLong("mode_t", cs).apply();
+            if (m != oneHand) setOneHandMode(m, false);
+            if (sp != split) setSplitMode(sp, false);
         }
         kv.setSplit(split);
         applyOneHand(false);
+        repairOneHand();
         long cc = cfg.getLong("clip_clear", 0L);
-        boolean wipe = cc > state.getLong("clip_clear_done", 0L) || (!cfg.getBoolean("clip_hist", true) && clips.size() > 0); // выключили историю или попросили очистить
-        if (wipe) { clips.clearAll(); saveClips(); state.edit().putLong("clip_clear_done", cc).apply(); }
-        else if (clips.expire(nowMin(), clipTtl())) saveClips();
+        if (cc > state.getLong("clip_clear_done", 0L)) { wipeClips(); state.edit().putLong("clip_clear_done", cc).apply(); }
+        else if (!cfg.getBoolean("clip_hist", true)) { if (clipFile().exists()) wipeClips(); }
+        else if (clipsLoaded && clipStore.expire(nowMin(), clipTtl())) saveClips();
+        else if (!clipsLoaded && clipFile().exists() && System.currentTimeMillis() - clipFile().lastModified() > clipTtl() * 60_000L) {
+            if (cs().expire(nowMin(), clipTtl())) saveClips();
+        }
     }
 
     private void showClips() {
@@ -1299,7 +1549,7 @@ public final class LightBoardIme extends InputMethodService implements KeyboardV
             clipPanel.setListener(new ClipView.Listener() {
                 @Override public void onPaste(String t) {
                     InputConnection ic = getCurrentInputConnection();
-                    if (ic != null) { resetFlags(); ic.commitText(t, 1); }
+                    if (ic != null) { resetFlags(); ic.commitText(t, 1); showUndo(t, true); }
                     if (cfg.getBoolean("clip_close", true)) hideClips(true);
                 }
                 @Override public void onAbc() { hideClips(true); }
@@ -1307,8 +1557,8 @@ public final class LightBoardIme extends InputMethodService implements KeyboardV
             });
             root.addView(clipPanel, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         }
-        if (clips.expire(nowMin(), clipTtl())) saveClips();
-        clipPanel.open(clips, cfg.getBoolean("clip_hist", true));
+        if (cs().expire(nowMin(), clipTtl())) saveClips();
+        clipPanel.open(clipStore, cfg.getBoolean("clip_hist", true));
         float dy = 20 * getResources().getDisplayMetrics().density;
         clipPanel.animate().cancel(); kvView.animate().cancel();
         clipPanel.setVisibility(View.VISIBLE); clipPanel.setAlpha(0f); clipPanel.setTranslationY(dy);
@@ -1334,29 +1584,41 @@ public final class LightBoardIme extends InputMethodService implements KeyboardV
         }).start();
     }
 
-    // ---------- самообучение (логика в Learner) ----------
-    /** Слово вставлено подсказкой или жестом: считаем его и запоминаем пару с предыдущим. */
     private void observe(CharSequence before, String low) {
         if (noLearn) return;
-        learner.bump(low, kindOf(low));
-        if (before == null) return;
+        int k = kindOf(low);
+        learner.bump(low, k);
+        lastFin = low; lastFinAt = SystemClock.uptimeMillis(); delSince = 0;
+        if (before == null || !pairable(k, low)) return;
         String pv = Learner.prevWord(before, before.length(), 32);
-        if (pv != null) learner.pair(pv, low);
+        if (pv != null && (pv.isEmpty() || pairable(-1, pv))) learner.pair(pv, low);
     }
 
-    /** 0 — слово из словаря, 1 — нет в словаре и не похоже на опечатку (своё), 2 — похоже на опечатку, 3 — словаря нет (считаем только частоту). */
+    private String lastFin;
+    private long lastFinAt;
+    private int delSince;
+
+    private boolean pairable(int kind, String w) {
+        if (kind == 0 || kind == 3 || learner.known(w)) return true;
+        if (kind >= 0) return false;
+        Lexicon lx = lay.own() ? Lexicon.peek(lay.id) : null;
+        return lx == null || lx.contains(w);
+    }
+
     private int kindOf(String w) {
         final Lexicon lx = lay.own() ? Lexicon.peek(lay.id) : null;
         if (addrField || lx == null) return 3;
         if (!ownPruned) { ownPruned = true; learner.pruneOwn(new Learner.Has() { @Override public boolean has(String x) { return lx.contains(x); } }); }
         if (lx.contains(w)) return 0;
         if (lx.n < 15000 || w.length() < 3) return 1;
+        int odd = lx.unseenTriples(w);
+        if (odd >= 2) return 5;
         String c = w.equals(lastCorrFor) ? lastCorr : lx.correct(w);
-        return c != null ? 2 : 1;
+        return c != null || odd == 1 ? 2 : 1;
     }
 
     private void spellRefresh(InputConnection ic) {
-        CharSequence b = ic.getTextBeforeCursor(32, 0);
+        CharSequence b = tb(ic, 32);
         int e = b == null ? 0 : b.length(), st = e;
         while (st > 0 && Learner.wordChar(b.charAt(st - 1))) st--;
         prefix = b == null ? "" : b.subSequence(st, e).toString();
@@ -1378,18 +1640,17 @@ public final class LightBoardIme extends InputMethodService implements KeyboardV
         });
     }
 
-    /** Копия из файла: настройки кладут import.json в filesDir; применяем и удаляем (в общих настройках ничего не остаётся). */
     private void applyImport() {
         File f = new File(getFilesDir(), "import.json");
         if (!f.exists()) return;
         try {
-            byte[] b = new byte[(int) Math.min(f.length(), 4_000_000L)];
-            try (java.io.FileInputStream in = new java.io.FileInputStream(f)) {
-                int p = 0, n;
-                while (p < b.length && (n = in.read(b, p, b.length - p)) > 0) p += n;
-            }
+            byte[] b = Vault.readFile(f);
+            if (b == Vault.LOCKED) return;
+            if (b == null) { f.delete(); return; }
             JSONObject o = new JSONObject(new String(b, "UTF-8"));
             JSONObject l = o.optJSONObject("learn");
+            String c = o.has("clips") && !o.isNull("clips") ? o.getString("clips") : null;
+            if ((l != null && learnLocked) || (c != null && cs().locked)) return;
             if (l != null) {
                 learner.clear();
                 learner.loadUser(l.optString("user_words", ""));
@@ -1399,24 +1660,58 @@ public final class LightBoardIme extends InputMethodService implements KeyboardV
                 learner.markAllDirty();
                 saveLearned();
             }
-            String c = o.optString("clips", null);
-            if (c != null) { clips.load(c); saveClips(); }
+            if (c != null) { ClipStore store = cs(); store.load(c); store.touchAll(nowMin()); saveClips(); }
         } catch (IOException | JSONException | RuntimeException ignored) { }
         f.delete();
     }
 
-    private void saveLearned() {
-        String w = learner.saveWords(), p = learner.savePairs(), u = learner.saveUser(), o = learner.saveOwn();
-        if (w == null && p == null && u == null && o == null) return; // с прошлого раза ничего не изменилось — диск не трогаем
-        SharedPreferences.Editor ed = state.edit();
-        if (w != null) ed.putString("learned", w);
-        if (p != null) ed.putString("pairs", p);
-        if (u != null) ed.putString("user_words", u);
-        if (o != null) ed.putString("own", o);
-        ed.apply();
+    private File learnFile() { return new File(getFilesDir(), LearnStore.FILE); }
+
+    private void loadLearned() {
+        String[] v = LearnStore.read(learnFile());
+        boolean legacy = false;
+        if (v == LearnStore.LOCKED) { learnLocked = true; v = new String[]{"", "", "", ""}; }
+        else if (v == null) {
+            legacy = state.contains("learned") || state.contains("pairs") || state.contains("user_words");
+            v = legacy ? new String[]{state.getString("learned", ""), state.getString("pairs", ""), state.getString("user_words", ""), state.getString("own", null)}
+                       : new String[]{"", "", "", ""};
+        }
+        learner.loadUser(v[2]); learner.loadWords(v[0]); learner.loadPairs(v[1]); learner.loadOwn(v[3]);
+        if (legacy) {
+            learner.markAllDirty();
+            if (saveLearnedNow()) state.edit().remove("learned").remove("pairs").remove("user_words").remove("own").apply();
+        }
     }
 
-    // ---------- панель эмодзи ----------
+    private void retryLearn() {
+        String[] v = LearnStore.read(learnFile());
+        if (v == LearnStore.LOCKED) {
+            if (learnTries < 1000) learnTries++;
+            return;
+        }
+        learnTries = 0;
+        learnLocked = false;
+        if (v != null) { learner.loadUser(v[2]); learner.loadWords(v[0]); learner.loadPairs(v[1]); }
+        learner.markAllDirty();
+    }
+
+    private boolean saveLearnedNow() {
+        if (learnLocked || !learner.isDirty()) return true;
+        try { LearnStore.write(learnFile(), learner.snapshot(), Vault.nextSeq()); return true; }
+        catch (IOException | RuntimeException e) { learner.markAllDirty(); return false; }
+    }
+
+    private void saveLearned() {
+        if (learnLocked || !learner.isDirty()) return;
+        final String[] snap = learner.snapshot();
+        final long q = Vault.nextSeq();
+        final File f = learnFile();
+        bg().post(new Runnable() { @Override public void run() {
+            try { LearnStore.write(f, snap, q); }
+            catch (IOException | RuntimeException e) { h.post(new Runnable() { @Override public void run() { learner.markAllDirty(); } }); }
+        } });
+    }
+
     private void showEmoji() {
         if (emojiShown || root == null || kv == null) return;
         if (emoji != null && emojiH != kvView.getHeight()) { root.removeView(emoji); emoji = null; }
@@ -1474,20 +1769,21 @@ public final class LightBoardIme extends InputMethodService implements KeyboardV
         schedule();
     }
 
-    // ---------- подсказки и авто-заглавная ----------
-    @Override public void onSuggest(int i) {
-        if ((!suggestOn && !(fieldOk && !lay.own())) || i < 0 || i > 2 || commit[i] == null) return; // скрытые подсказки (пароли, цифровой ввод) не вставляются
+    @Override public void onSuggest(int i) { try { onSuggestImpl(i); } catch (RuntimeException e) { Diag.save(this, e); } }
+
+    private void onSuggestImpl(int i) {
+        if ((!suggestOn && !(fieldOk && !lay.own())) || i < 0 || i > 2 || commit[i] == null) return;
         InputConnection ic = getCurrentInputConnection();
         String t = commit[i];
         if (ic == null || t == null || t.isEmpty()) return;
         if (swipeAlt) { ic.deleteSurroundingText(swipeLen, 0); swipeAlt = false; }
         else if (!prefix.isEmpty()) {
             ic.deleteSurroundingText(prefix.length(), 0);
-            if (t.equalsIgnoreCase(prefix) || (i == 0 && t.equals(prefix))) learn(prefix.toLowerCase(Locale.ROOT)); // тап по «как набрано»
+            if (t.equalsIgnoreCase(prefix) || (i == 0 && t.equals(prefix))) learn(prefix.toLowerCase(Locale.ROOT));
         }
-        observe(ic.getTextBeforeCursor(32, 0), t.toLowerCase(Locale.ROOT));
+        observe(tb(ic, 32), t.toLowerCase(Locale.ROOT));
         ic.commitText(t + " ", 1);
-        afterPunct = 0; acArmed = false; trailAutoSpace = true; wordBuf.setLength(0); capsNeed = true;
+        afterPunct = 0; acArmed = false; trailAutoSpace = true; clearWord(); capsNeed = true;
         shiftManual = false;
         schedule();
     }
@@ -1495,16 +1791,15 @@ public final class LightBoardIme extends InputMethodService implements KeyboardV
     private String enterLabel() {
         if (ei == null || (ei.imeOptions & EditorInfo.IME_FLAG_NO_ENTER_ACTION) != 0) return null;
         switch (ei.imeOptions & EditorInfo.IME_MASK_ACTION) {
-            case EditorInfo.IME_ACTION_GO:     return ru ? "Перейти" : "Go";
-            case EditorInfo.IME_ACTION_SEARCH: return ru ? "Найти" : "Search";
-            case EditorInfo.IME_ACTION_SEND:   return ru ? "Отпр." : "Send";
-            case EditorInfo.IME_ACTION_NEXT:   return ru ? "Далее" : "Next";
-            case EditorInfo.IME_ACTION_DONE:   return ru ? "Готово" : "Done";
+            case EditorInfo.IME_ACTION_GO:     return KbText.t("Перейти");
+            case EditorInfo.IME_ACTION_SEARCH: return KbText.t("Найти");
+            case EditorInfo.IME_ACTION_SEND:   return KbText.t("Отпр.");
+            case EditorInfo.IME_ACTION_NEXT:   return KbText.t("Далее");
+            case EditorInfo.IME_ACTION_DONE:   return KbText.t("Готово");
             default: return null;
         }
     }
 
-    /** Склеивает много обновлений подряд в одно (одна пара IPC-вызовов за кадр, а не за каждое событие). */
     private void schedule() {
         h.removeCallbacks(refreshR);
         h.post(refreshR);
@@ -1518,24 +1813,24 @@ public final class LightBoardIme extends InputMethodService implements KeyboardV
         InputConnection ic = getCurrentInputConnection();
         if (ic == null || kv == null) return;
 
-        if (autoCaps && capsNeed && ei != null && shift != LOCK && !shiftManual) { // авто-заглавная в начале предложения (спрашиваем у поля только когда что-то могло измениться)
+        if (autoCaps && capsNeed && ei != null && shift != LOCK && !shiftManual && !slow()) {
             capsNeed = false;
             int ns = ic.getCursorCapsMode(ei.inputType) != 0 ? ON : OFF;
             if (ns != shift) { shift = ns; kv.setShift(ns); }
         }
         kv.setEnterLabel(enterLabel());
         if (listening) return;
-        if (!showWords) { setChip(null); kv.setSuggestions(null, null, null); return; } // подсказки в настройках выключены
+        if (!showWords) { setChip(null); kv.setSuggestions(null, null, null); return; }
         boolean imgNow = imgUri != null && !pwdField;
         boolean clipNow = (clipText != null && chipOk()) || imgNow;
-        String chipTxt = imgNow ? getString(imgLabel) : (clipNow ? preview(clipText) : null);
+        String chipTxt = imgNow ? imgLabel : (clipNow ? preview(clipText) : null);
         kv.setClipImage(imgNow ? imgThumb : null);
         if (swipeAlt) { setChip(null); kv.setSuggestions(shown[0], shown[1], shown[2]); return; }
-        if (!suggestOn) { setChip(chipTxt); if (fieldOk && !lay.own()) spellRefresh(ic); else kv.setSuggestions(null, null, null); return; }
+        if (!suggestOn) { setChip(chipTxt); if (fieldOk && !noLearn && !lay.own()) spellRefresh(ic); else kv.setSuggestions(null, null, null); return; }
 
-        CharSequence b = ic.getTextBeforeCursor(32, 0);
+        CharSequence b = tb(ic, 32);
         if ((b == null || b.length() == 0) && wordBuf.length() > 0) {
-            prefix = wordBuf.toString(); // приложение не отдаёт текст — работаем по тому, что набрали сами
+            prefix = wordBuf.toString();
         } else {
             int e = b == null ? 0 : b.length(), s = e;
             while (s > 0 && Learner.wordChar(b.charAt(s - 1))) s--;
@@ -1545,12 +1840,12 @@ public final class LightBoardIme extends InputMethodService implements KeyboardV
         setChip(clipNow && prefix.isEmpty() ? chipTxt : null);
         for (int i = 0; i < 3; i++) { shown[i] = null; commit[i] = null; }
         if (prefix.isEmpty()) {
-            // что вы обычно пишете после предыдущего слова (в начале предложения — чем начинаете), затем свои частые слова, затем стандартные
+
             int n = 0;
             String pv = b == null ? null : Learner.prevWord(b, b.length(), 32);
             if (pv != null) n = learner.next(pv, nxt, 0);
             n = learner.frequent(nxt, n, 3);
-            String[] d = lay.id.equals("en") ? DEF_EN : ru ? DEF_RU : new String[0]; // стандартные слова есть только у русского и английского
+            String[] d = lay.id.equals("en") ? DEF_EN : ru ? DEF_RU : new String[0];
             for (int i = 0; n < 3 && i < d.length; i++) {
                 boolean dup = false;
                 for (int j = 0; j < n; j++) if (nxt[j].equals(d[i])) dup = true;
@@ -1565,14 +1860,13 @@ public final class LightBoardIme extends InputMethodService implements KeyboardV
             String low = prefix.toLowerCase(Locale.ROOT);
             int n = lex == null ? 0 : lex.suggest(low, match);
             String pb = learner.best(low);
-            if (pb != null && !(n > 0 && pb.equals(match[0])) && !(n > 1 && pb.equals(match[1]))) { // своё частое слово — первым
+            if (pb != null && !(n > 0 && pb.equals(match[0])) && !(n > 1 && pb.equals(match[1]))) {
                 match[2] = match[1]; match[1] = match[0]; match[0] = pb; n = Math.min(3, n + 1);
             }
             String corr = null;
             if (acOn && lex != null && lex.n >= 15000 && prefix.length() >= 3 && !learner.known(low)) {
                 if (low.equals(lastCorrFor)) corr = lastCorr;
-                else if (prefix.length() == 3) { corr = lex.correct(low); lastCorrFor = low; lastCorr = corr; } // короткий префикс считается мгновенно
-                else askCorrect(lex, low); // длинные — в фоне: основной поток во время набора не занят перебором словаря
+                else askCorrect(lex, low, tt.matches(low) ? tt.copy() : null);
             }
             String quoted = "\u201C" + prefix + "\u201D";
             shown[0] = quoted; commit[0] = prefix;
@@ -1585,7 +1879,7 @@ public final class LightBoardIme extends InputMethodService implements KeyboardV
             } else {
                 shown[0] = null; commit[0] = null;
                 shown[1] = quoted; commit[1] = prefix;
-                if (lex != null && lex.n >= 15000 && prefix.length() >= 5 && !learner.known(low)) { // слово не продолжается ни во что: может быть, пропущен пробел
+                if (lex != null && lex.n >= 15000 && prefix.length() >= 5 && !learner.known(low)) {
                     String sp = lex.split(low);
                     if (sp != null) { shown[2] = commit[2] = caseLike(sp); }
                 }
@@ -1594,12 +1888,11 @@ public final class LightBoardIme extends InputMethodService implements KeyboardV
         kv.setSuggestions(shown[0], shown[1], shown[2]);
     }
 
-    /** Подбор исправления в фоновом потоке с задержкой: пока человек печатает, считается только последняя буква. */
-    private void askCorrect(final Lexicon lex, final String low) {
+    private void askCorrect(final Lexicon lex, final String low, final Touch snap) {
         if (corrJob != null) bg().removeCallbacks(corrJob);
         corrJob = new Runnable() {
             @Override public void run() {
-                final String r = lex.correct(low);
+                final String r = lex.correct(low, 0L, snap);
                 h.post(new Runnable() {
                     @Override public void run() {
                         lastCorrFor = low; lastCorr = r;
@@ -1611,7 +1904,6 @@ public final class LightBoardIme extends InputMethodService implements KeyboardV
         bg().postDelayed(corrJob, 70);
     }
 
-    /** Один фоновый поток на подбор исправлений и картинки; создаётся при первой необходимости и гасится вместе с кэшами. */
     private Handler bg() {
         if (corrH == null) {
             corrThread = new HandlerThread("lb-bg", android.os.Process.THREAD_PRIORITY_BACKGROUND);

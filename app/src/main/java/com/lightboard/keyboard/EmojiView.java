@@ -18,11 +18,6 @@ import java.io.InputStreamReader;
 import java.util.ArrayList;
 import java.util.Locale;
 
-/**
- * Панель эмодзи. Глифы рисует системный шрифт, поэтому сами картинки приложение не хранит.
- * Данные (assets/emoji.txt) читаются только при первом открытии панели.
- * Сетка прокручивается по горизонтали с инерцией; в покое кадры не запрашиваются.
- */
 final class EmojiView extends View {
 
     interface Listener {
@@ -39,7 +34,7 @@ final class EmojiView extends View {
     private Listener lis;
     private final Handler h = new Handler(Looper.getMainLooper());
 
-    private String[] names = new String[0], icons = new String[0], titles = new String[0]; // titles — names в верхнем регистре (кэш для onDraw)
+    private String[] names = new String[0], icons = new String[0], titles = new String[0];
     private String[][] cells = new String[0][];
     private int[] startCol = new int[0];
     private int totalCols, rows = 5;
@@ -52,10 +47,9 @@ final class EmojiView extends View {
     private long lastFrame, tapT;
     private int tapCol = -1, tapRow = -1;
 
-    // касания
     private float downX, downY, lastX;
     private boolean dragging, barDown;
-    private int barItem = -2; // -1 ABC, 0..n-1 категории, 1000 удалить
+    private int barItem = -2;
     private VelocityTracker vt;
     private final int slop;
     private boolean backHeld;
@@ -94,7 +88,6 @@ final class EmojiView extends View {
         pPanel.setShader(new android.graphics.LinearGradient(0, 0, 0, H, th.panelTop, th.panelBot, android.graphics.Shader.TileMode.CLAMP));
     }
 
-    /** Вызывается при каждом открытии панели: обновляет «недавние» и возвращает в начало. */
     void open(String recentList) {
         recent = recentList == null ? "" : recentList.trim();
         if (!loaded) load(); else rebuildRecent();
@@ -103,7 +96,6 @@ final class EmojiView extends View {
         invalidate();
     }
 
-    // ---------- данные ----------
     private final ArrayList<String> bName = new ArrayList<>(), bIcon = new ArrayList<>();
     private final ArrayList<String[]> bCells = new ArrayList<>();
 
@@ -130,7 +122,7 @@ final class EmojiView extends View {
         ArrayList<String> nm = new ArrayList<>(n + 1), ic = new ArrayList<>(n + 1);
         ArrayList<String[]> cl = new ArrayList<>(n + 1);
         int off = 0;
-        if (!recent.isEmpty()) { // первая секция «Недавние» (если есть) заменяет прошлую
+        if (!recent.isEmpty()) {
             if (n > 0 && bName.get(0).equals("Недавние")) off = 1;
             nm.add("Недавние"); ic.add("\uD83D\uDD52"); cl.add(recent.split("\\s+"));
         } else if (n > 0 && bName.get(0).equals("Недавние")) off = 1;
@@ -138,7 +130,7 @@ final class EmojiView extends View {
         bName.clear(); bName.addAll(nm); bIcon.clear(); bIcon.addAll(ic); bCells.clear(); bCells.addAll(cl);
         names = nm.toArray(new String[0]); icons = ic.toArray(new String[0]); cells = cl.toArray(new String[0][]);
         titles = new String[names.length];
-        for (int i = 0; i < names.length; i++) titles[i] = names[i].toUpperCase(Locale.getDefault());
+        for (int i = 0; i < names.length; i++) titles[i] = KbText.t(names[i]).toUpperCase(Locale.getDefault());
     }
 
     private void layout() {
@@ -174,7 +166,6 @@ final class EmojiView extends View {
         return s;
     }
 
-    // ---------- анимация ----------
     private boolean tick(long now) {
         float dt = lastFrame == 0 ? 0f : Math.min(48f, now - lastFrame);
         boolean a = false;
@@ -190,7 +181,7 @@ final class EmojiView extends View {
         if (scrollX < 0f) { scrollX = 0f; vel = 0f; }
         if (scrollX > maxScroll) { scrollX = maxScroll; vel = 0f; }
         if (tapT != 0) { if (now - tapT < 260) a = true; else { tapT = 0; tapCol = -1; } }
-        if (names.length > 0) { // «бегунок» категории
+        if (names.length > 0) {
             float tx = iconX(sectionAt(scrollX));
             if (hlX < 0f) hlX = tx;
             else if (Math.abs(tx - hlX) > 0.5f) { hlX += (tx - hlX) * (1f - (float) Math.exp(-dt / 70f)); a = true; }
@@ -204,7 +195,6 @@ final class EmojiView extends View {
         return l + (r - l) * (i + 0.5f) / n;
     }
 
-    // ---------- рисование ----------
     @Override protected void onDraw(Canvas c) {
         long now = SystemClock.uptimeMillis();
         boolean anim = tick(now);
@@ -240,7 +230,6 @@ final class EmojiView extends View {
             }
         }
 
-        // нижняя панель: ABC, категории, удалить
         float by = barTop + (H - barTop) * 0.46f;
         float w = 50 * den, hh = 34 * den;
         pFill.setColor(barItem == -1 && barDown ? th.specDown : th.spec);
@@ -265,7 +254,6 @@ final class EmojiView extends View {
         if (anim) postInvalidateOnAnimation();
     }
 
-    // ---------- касания ----------
     @Override public boolean onTouchEvent(MotionEvent e) {
         switch (e.getActionMasked()) {
             case MotionEvent.ACTION_DOWN: {

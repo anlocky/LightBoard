@@ -8,14 +8,13 @@ import android.os.SystemClock;
 import android.view.MotionEvent;
 import android.view.View;
 
-/** Переключатель в стиле Material 3 Expressive: дорожка-таблетка, ползунок растёт и «пружинит», внутри появляется галочка. */
 final class SwitchView extends View {
     interface Listener { void onChanged(boolean on); }
 
     private final float den;
     private final int accent, onAccent, trackOff, outline;
     private boolean on;
-    private float p;        // 0 выкл .. 1 вкл
+    private float p;
     private long last;
     private Listener lis;
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -50,7 +49,7 @@ final class SwitchView extends View {
         paint.setStyle(Paint.Style.FILL);
         paint.setColor(Theme.mix(trackOff, accent, p));
         c.drawRoundRect(0, 0, w, h, h / 2f, h / 2f, paint);
-        if (p < 1f) { // контур выключенной дорожки гаснет по мере включения
+        if (p < 1f) {
             paint.setStyle(Paint.Style.STROKE); paint.setStrokeWidth(2 * den);
             paint.setColor(Theme.fade(outline, 1f - p));
             c.drawRoundRect(den, den, w - den, h - den, h / 2f - den, h / 2f - den, paint);
@@ -59,7 +58,7 @@ final class SwitchView extends View {
         float k = Anim.back(p), r = (8f + 4f * Math.min(1f, p)) * den, cx = (16f + 20f * k) * den, cy = h / 2f;
         paint.setColor(Theme.mix(outline, onAccent, p));
         c.drawCircle(cx, cy, r, paint);
-        if (p > 0.45f) { // галочка внутри ползунка
+        if (p > 0.45f) {
             float a = Math.min(1f, (p - 0.45f) / 0.55f), u = den * 0.9f;
             paint.setStyle(Paint.Style.STROKE); paint.setStrokeWidth(1.8f * den); paint.setStrokeCap(Paint.Cap.ROUND); paint.setStrokeJoin(Paint.Join.ROUND);
             paint.setColor(Theme.fade(accent, a));

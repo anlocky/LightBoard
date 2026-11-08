@@ -2,10 +2,6 @@ package com.lightboard.keyboard;
 
 import java.util.ArrayList;
 
-/**
- * План клавиш без отрисовки (чистая Java): цифровая клавиатура и планшетная раскладка описываются здесь один раз и одинаково
- * строятся в обоих дизайнах. Ширина клавиши задана в «колонках»; сумма по каждому ряду равна total, поэтому края рядов совпадают.
- */
 final class KeyPlan {
     static final int CHAR = 0, SHIFT = 1, BACK = 2, PAGE = 3, SPACE = 4, ENTER = 5, EMOJI = 6, MIC = 7, PUNCT = 8, LANG = 9,
             TAB = 10, CAPS = 11, LEFT = 12, RIGHT = 13;
@@ -14,12 +10,12 @@ final class KeyPlan {
         final int kind, target;
         final String label;
         final float w;
-        final boolean letter; // буква: заглавная при Shift и долгое нажатие с вариантами
+        final boolean letter;
         Spec(int kind, String label, float w, int target, boolean letter) { this.kind = kind; this.label = label; this.w = w; this.target = target; this.letter = letter; }
     }
 
     final float total;
-    final boolean pill; // клавиши-«таблетки» (цифровая клавиатура)
+    final boolean pill;
     final ArrayList<ArrayList<Spec>> rows = new ArrayList<>();
 
     private KeyPlan(float total, boolean pill) { this.total = total; this.pill = pill; }
@@ -29,25 +25,21 @@ final class KeyPlan {
     private static void kind(ArrayList<Spec> r, int k, float w) { r.add(new Spec(k, null, w, 0, false)); }
     private static void chars(ArrayList<Spec> r, String s, boolean letter) { for (int i = 0; i < s.length(); i++) ch(r, String.valueOf(s.charAt(i)), 1f, letter); }
 
-    /** mode 1 — PIN и целые числа (3 колонки: 1–9, внизу «стереть», 0, готово); 4 — число со знаком/точкой, 2 — телефон, 3 — дата/время (добавляется колонка знаков). */
     static KeyPlan numpad(int mode) {
         boolean pin = mode == 1;
         KeyPlan p = new KeyPlan(pin ? 3f : 3.85f, true);
-        String[] sym = Layouts.pad(mode == 5 ? 4 : mode);
+        String[] sym = Layouts.pad(mode);
         for (int r = 0; r < 3; r++) {
             ArrayList<Spec> row = p.row();
             for (int c = 0; c < 3; c++) ch(row, String.valueOf(r * 3 + c + 1), 1f, false);
             if (!pin) { if (r == 0) kind(row, BACK, 0.85f); else ch(row, sym[r == 1 ? 2 : 3], 0.85f, false); }
         }
         ArrayList<Spec> last = p.row();
-        if (mode == 5) { last.add(new Spec(PAGE, "ABC", 1f, 0, false)); ch(last, "0", 1f, false); ch(last, sym[1], 1f, false); kind(last, ENTER, 0.85f); }
-        else if (pin) { kind(last, BACK, 1f); ch(last, "0", 1f, false); kind(last, ENTER, 1f); }
+        if (pin) { kind(last, BACK, 1f); ch(last, "0", 1f, false); kind(last, ENTER, 1f); }
         else { ch(last, sym[0], 1f, false); ch(last, "0", 1f, false); ch(last, sym[1], 1f, false); kind(last, ENTER, 0.85f); }
         return p;
     }
 
-
-    /** Подпись клавиши возврата к буквам: как в Gboard — первые буквы алфавита раскладки. */
     static String abc(Layouts.L lay) {
         char c = lay.r1.isEmpty() ? 'q' : lay.r1.charAt(0);
         if (c >= 0x400 && c <= 0x4FF) return "АБВ";
@@ -60,18 +52,23 @@ final class KeyPlan {
         ArrayList<Spec> b = p.row();
         b.add(new Spec(PAGE, abc(lay), 1.5f, 0, false));
         b.add(new Spec(PUNCT, l, 1f, 0, false));
-        b.add(new Spec(PAGE, "1234", 1f, 3, false));
+        kind(b, EMOJI, 1f);
         kind(b, SPACE, 4f);
         b.add(new Spec(PUNCT, r, 1f, 0, false));
         kind(b, ENTER, 1.5f);
     }
 
-    /** Страницы ?123 на телефоне (как в Gboard): 10 колонок. Страница 1 — цифры и знаки, страница 2 — остальные знаки. */
-    static KeyPlan symbols(Layouts.L lay, int page) {
+    static KeyPlan symbols(Layouts.L lay, int page) { return symbols(lay, page, false); }
+
+    static KeyPlan symbols(Layouts.L lay, int page, boolean extra) {
         KeyPlan p = new KeyPlan(10f, false);
         ArrayList<Spec> r = p.row();
-        if (page == 1) { chars(r, "1234567890", false); r = p.row(); chars(r, "@#$_&-+()/", false); }
-        else {
+        if (page == 1) {
+            chars(r, "1234567890", false);
+            if (extra) { r = p.row(); chars(r, "~`|\u2022\u221A\u03C0\u00F7\u00D7\u00A7\u0394", false); }
+            r = p.row(); chars(r, "@#$_&-+()/", false);
+        } else {
+            if (extra) { chars(r, "1234567890", false); r = p.row(); }
             chars(r, "~`|\u2022\u221A\u03C0\u00F7\u00D7\u00A7\u0394", false);
             String c = lay.cur.equals("$") || lay.cur.equals("\u00A3") || lay.cur.equals("\u20AC") || lay.cur.equals("\u00A2") ? "\u00A5" : lay.cur;
             r = p.row(); chars(r, "\u00A3\u20AC" + c + "\u00A2^\u00B0={}\\", false);
@@ -86,7 +83,8 @@ final class KeyPlan {
 
     private static final String TOP_SYM = "%\\|=[]<>{}\u00B0~", ROW2_SYM = "@#$_&-+()/", ROW3_SYM = "*\"':;!?";
 
-    /** Мелкая подсказка в углу буквы: rr — ряд букв (0 — верхний), pos — номер буквы слева. Цифры только на верхнем ряду и только когда ряда цифр нет. */
+    static String topSym(int pos) { return pos < TOP_SYM.length() ? String.valueOf(TOP_SYM.charAt(pos)) : null; }
+
     static String hint(int rr, int pos, boolean numRow, boolean num, boolean sym) {
         if (rr == 0) {
             if (!numRow && num) return pos < 10 ? String.valueOf((pos + 1) % 10) : null;
@@ -96,7 +94,6 @@ final class KeyPlan {
         return sym && pos < t.length() ? String.valueOf(t.charAt(pos)) : null;
     }
 
-    /** Планшетная раскладка (как на ПК): ряд цифр по желанию, Tab, Caps, Enter, два Shift, стрелки и две клавиши «?123». page != 0 — символы. */
     static KeyPlan tablet(Layouts.L lay, boolean numRow, int page) {
         KeyPlan p = new KeyPlan(15f, false);
         if (page != 0) {
@@ -109,7 +106,7 @@ final class KeyPlan {
             chars(r, page == 1 ? "*\"':;!?,./" : "%\u00A9\u00AE\u2122\u2713[]<>\\", false);
             ArrayList<Spec> b = q.row();
             b.add(new Spec(PAGE, abc(lay), 1.5f, 0, false));
-            b.add(new Spec(PAGE, "1234", 1.5f, 3, false));
+            kind(b, EMOJI, 1.5f);
             kind(b, SPACE, 6.0f); kind(b, LEFT, 1f); kind(b, RIGHT, 1f);
             b.add(new Spec(PAGE, abc(lay), 1.3f, 0, false));
             return q;

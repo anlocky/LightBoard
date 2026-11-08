@@ -10,7 +10,6 @@ import android.os.SystemClock;
 import android.view.MotionEvent;
 import android.view.View;
 
-/** Нижняя навигация в стиле Material 3 Expressive: индикатор-таблетка плавно переезжает к выбранной вкладке, значок «подпрыгивает». */
 final class NavBarView extends View {
     interface Listener { void onTab(int i); }
 
@@ -18,7 +17,7 @@ final class NavBarView extends View {
     private final String[] labels;
     private final int bg, text, muted, indicator;
     private int sel;
-    private float pos;      // положение индикатора в долях вкладки
+    private float pos;
     private long selT;
     private Listener lis;
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG), pText = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -48,7 +47,7 @@ final class NavBarView extends View {
         long now = SystemClock.uptimeMillis();
         float bounce = selT == 0 ? 1f : Anim.clamp((now - selT) / 320f, 0f, 1f);
         float iy = 30 * den;
-        // индикатор: растягивается на лету, как «жидкая» таблетка
+
         float stretch = 1f + Math.min(0.5f, Math.abs(sel - pos) * 0.6f);
         float icx = (pos + 0.5f) * cell, iw = 32 * den * stretch;
         paint.setColor(indicator);
@@ -73,34 +72,34 @@ final class NavBarView extends View {
         float u = den;
         paint.setStyle(Paint.Style.STROKE); paint.setStrokeWidth(2f * u); paint.setColor(col);
         switch (i) {
-            case 0: // дом
+            case 0:
                 path.reset();
                 path.moveTo(cx - 9 * u, cy); path.lineTo(cx, cy - 8 * u); path.lineTo(cx + 9 * u, cy);
                 path.moveTo(cx - 6.5f * u, cy - 2 * u); path.lineTo(cx - 6.5f * u, cy + 8 * u); path.lineTo(cx + 6.5f * u, cy + 8 * u); path.lineTo(cx + 6.5f * u, cy - 2 * u);
                 c.drawPath(path, paint);
                 break;
-            case 1: // палитра: круг и три капли
+            case 1:
                 c.drawCircle(cx, cy, 9 * u, paint);
                 paint.setStyle(Paint.Style.FILL);
                 c.drawCircle(cx - 3.5f * u, cy - 2.5f * u, 1.7f * u, paint);
                 c.drawCircle(cx + 1.5f * u, cy - 4 * u, 1.7f * u, paint);
                 c.drawCircle(cx + 4.5f * u, cy + 0.5f * u, 1.7f * u, paint);
                 break;
-            case 2: // клавиатура
+            case 2:
                 rf.set(cx - 10 * u, cy - 6.5f * u, cx + 10 * u, cy + 6.5f * u);
                 c.drawRoundRect(rf, 3 * u, 3 * u, paint);
                 paint.setStyle(Paint.Style.FILL);
                 for (int k = 0; k < 3; k++) { c.drawCircle(cx - 5 * u + k * 5 * u, cy - 2 * u, 1.1f * u, paint); }
                 c.drawRect(cx - 5 * u, cy + 1.5f * u, cx + 5 * u, cy + 3 * u, paint);
                 break;
-            case 3: // книга
+            case 3:
                 rf.set(cx - 8 * u, cy - 9 * u, cx + 8 * u, cy + 9 * u);
                 c.drawRoundRect(rf, 3 * u, 3 * u, paint);
                 c.drawLine(cx - 4 * u, cy - 9 * u, cx - 4 * u, cy + 9 * u, paint);
                 c.drawLine(cx - 1 * u, cy - 3 * u, cx + 4.5f * u, cy - 3 * u, paint);
                 c.drawLine(cx - 1 * u, cy + 1 * u, cx + 4.5f * u, cy + 1 * u, paint);
                 break;
-            default: // «ещё»: круг с буквой i
+            default:
                 c.drawCircle(cx, cy, 9.5f * u, paint);
                 c.drawLine(cx, cy - 1 * u, cx, cy + 5 * u, paint);
                 paint.setStyle(Paint.Style.FILL);

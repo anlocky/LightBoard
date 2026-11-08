@@ -1,5 +1,7 @@
 package com.lightboard.keyboard;
 
+import java.nio.ByteBuffer;
+import java.nio.CharBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.security.SecureRandom;
@@ -9,16 +11,11 @@ import javax.crypto.Mac;
 import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 
-/**
- * Шифрование файла резервной копии паролем: ключ из пароля — PBKDF2-HMAC-SHA256 (собран на HmacSHA256, он есть на любой версии Android),
- * шифр — AES-256-GCM. Формат: «LBK1» + соль (16) + число итераций (4) + IV (12) + шифртекст с меткой; заголовок входит в проверяемые данные,
- * поэтому подмена соли или числа итераций обнаруживается. Неверный пароль и повреждённый файл неотличимы: метка не сойдётся.
- */
 final class BackupCrypt {
     private BackupCrypt() { }
 
     private static final byte[] MAGIC = {'L', 'B', 'K', '1'};
-    private static final int SALT = 16, IV = 12, HEAD = 4 + SALT + 4, ITER = 250_000, MIN_ITER = 10_000, MAX_ITER = 2_000_000, TAG = 128;
+    private static final int SALT = 16, IV = 12, HEAD = 4 + SALT + 4, ITER = 600_000, MIN_ITER = 10_000, MAX_ITER = 2_000_000, TAG = 128;
     private static final SecureRandom RND = new SecureRandom();
 
     static boolean isEncrypted(byte[] b) {
@@ -49,7 +46,6 @@ final class BackupCrypt {
         } finally { Arrays.fill(key, (byte) 0); }
     }
 
-    /** Бросает GeneralSecurityException (AEADBadTagException), если пароль неверный или файл изменён. */
     static byte[] decrypt(byte[] data, char[] password) throws GeneralSecurityException {
         if (!isEncrypted(data)) throw new GeneralSecurityException("not encrypted");
         int iter = getInt(data, 4 + SALT);
@@ -64,9 +60,11 @@ final class BackupCrypt {
         } finally { Arrays.fill(key, (byte) 0); }
     }
 
-    /** PBKDF2 (RFC 8018) с HMAC-SHA256, один блок: ключ 32 байта. */
     static byte[] pbkdf2(char[] password, byte[] salt, int iterations) throws GeneralSecurityException {
-        byte[] pw = new String(password).getBytes(StandardCharsets.UTF_8);
+        ByteBuffer bb = StandardCharsets.UTF_8.encode(CharBuffer.wrap(password));
+        byte[] pw = new byte[bb.remaining()];
+        bb.get(pw);
+        if (bb.hasArray()) Arrays.fill(bb.array(), (byte) 0);
         if (pw.length == 0) throw new GeneralSecurityException("empty password");
         try {
             Mac mac = Mac.getInstance("HmacSHA256");
@@ -75,7 +73,8 @@ final class BackupCrypt {
             mac.update(new byte[]{0, 0, 0, 1});
             byte[] u = mac.doFinal(), t = u.clone();
             for (int i = 1; i < iterations; i++) {
-                u = mac.doFinal(u);
+                mac.update(u);
+                mac.doFinal(u, 0);
                 for (int j = 0; j < t.length; j++) t[j] ^= u[j];
             }
             return t;

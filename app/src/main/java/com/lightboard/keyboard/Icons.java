@@ -5,7 +5,6 @@ import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.RectF;
 
-/** Векторные иконки: ни шрифтов, ни битмапов. u — плотность экрана (1dp в пикселях). */
 final class Icons {
     private Icons() { }
 
@@ -38,7 +37,6 @@ final class Icons {
         c.drawLine(cx - 8 * u, cy + 2 * u, cx - 3 * u, cy + 7 * u, stroke);
     }
 
-    /** Шляпа и очки: значок режима инкогнито. */
     static void incognito(Canvas c, Paint stroke, float cx, float cy, float u, int color) {
         stroke.setColor(color);
         c.drawLine(cx - 9 * u, cy - 3 * u, cx + 9 * u, cy - 3 * u, stroke);
@@ -87,6 +85,22 @@ final class Icons {
         c.drawLine(cx - 3 * u, cy + 3.5f * u, cx + 1.5f * u, cy + 3.5f * u, stroke);
     }
 
+    static void undo(Canvas c, Path p, Paint stroke, float cx, float cy, float u, int color, boolean redo) {
+        stroke.setColor(color);
+        float k = redo ? -1f : 1f;
+        p.reset();
+        p.moveTo(cx + 5f * u * k, cy + 6f * u);
+        p.lineTo(cx + 5f * u * k, cy + 1f * u);
+        p.quadTo(cx + 5f * u * k, cy - 3f * u, cx + 1f * u * k, cy - 3f * u);
+        p.lineTo(cx - 5.5f * u * k, cy - 3f * u);
+        c.drawPath(p, stroke);
+        p.reset();
+        p.moveTo(cx - 2.5f * u * k, cy - 6.5f * u);
+        p.lineTo(cx - 6f * u * k, cy - 3f * u);
+        p.lineTo(cx - 2.5f * u * k, cy + 0.5f * u);
+        c.drawPath(p, stroke);
+    }
+
     static void cross(Canvas c, Paint stroke, float cx, float cy, float u, int color) {
         stroke.setColor(color);
         c.drawLine(cx - 4 * u, cy - 4 * u, cx + 4 * u, cy + 4 * u, stroke);
@@ -121,14 +135,12 @@ final class Icons {
         }
     }
 
-    /** Две половины клавиатуры с просветом посередине. */
     static void split(Canvas c, Paint stroke, RectF rf, float cx, float cy, float u, int color) {
         stroke.setColor(color);
         rf.set(cx - 11.5f * u, cy - 7 * u, cx - 2.5f * u, cy + 7 * u); c.drawRoundRect(rf, 2.5f * u, 2.5f * u, stroke);
         rf.set(cx + 2.5f * u, cy - 7 * u, cx + 11.5f * u, cy + 7 * u); c.drawRoundRect(rf, 2.5f * u, 2.5f * u, stroke);
     }
 
-    /** Узкий телефон и стрелка в его сторону. */
     static void oneHand(Canvas c, Paint stroke, RectF rf, float cx, float cy, float u, int color) {
         stroke.setColor(color);
         rf.set(cx - 10 * u, cy - 9.5f * u, cx - 1.5f * u, cy + 9.5f * u); c.drawRoundRect(rf, 2.5f * u, 2.5f * u, stroke);
@@ -144,14 +156,12 @@ final class Icons {
         c.drawPath(p, stroke);
     }
 
-    /** Булавка для закрепления записей буфера. */
     static void pin(Canvas c, Paint fill, Paint stroke, float cx, float cy, float u, boolean on, int color) {
         stroke.setColor(color); fill.setColor(color);
         if (on) c.drawCircle(cx, cy - 3.5f * u, 4.2f * u, fill); else c.drawCircle(cx, cy - 3.5f * u, 4.2f * u, stroke);
         c.drawLine(cx, cy + 0.7f * u, cx, cy + 8 * u, stroke);
     }
 
-    /** Значок приложения: жирная буква «L» (логотип на пробеле Material-дизайна). */
     static void logo(Canvas c, Path p, Paint stroke, Paint fill, float cx, float cy, float u, int color) {
         float w = stroke.getStrokeWidth();
         stroke.setStrokeWidth(3.6f * u); stroke.setColor(color);
@@ -168,7 +178,6 @@ final class Icons {
         c.drawPath(p, stroke);
     }
 
-    /** Tab: стрелка вправо до черты. */
     static void tab(Canvas c, Paint stroke, float cx, float cy, float u, int color) {
         stroke.setColor(color);
         c.drawLine(cx - 7 * u, cy, cx + 5 * u, cy, stroke);
@@ -177,7 +186,6 @@ final class Icons {
         c.drawLine(cx + 8 * u, cy - 5 * u, cx + 8 * u, cy + 5 * u, stroke);
     }
 
-    /** Caps Lock: стрелка вверх над чертой. */
     static void caps(Canvas c, Paint stroke, float cx, float cy, float u, int color) {
         stroke.setColor(color);
         c.drawLine(cx - 5.5f * u, cy, cx, cy - 5.5f * u, stroke);
@@ -185,7 +193,6 @@ final class Icons {
         c.drawLine(cx - 5.5f * u, cy + 4.5f * u, cx + 5.5f * u, cy + 4.5f * u, stroke);
     }
 
-    /** Маленький треугольник-стрелка влево или вправо (курсор). */
     static void triangle(Canvas c, Path p, Paint fill, float cx, float cy, float u, boolean left, int color) {
         fill.setColor(color);
         float d = left ? -1f : 1f;

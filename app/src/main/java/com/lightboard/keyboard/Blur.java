@@ -8,12 +8,6 @@ import android.view.Window;
 import android.view.WindowManager;
 import java.util.function.Consumer;
 
-/**
- * Настоящее размытие содержимого за клавиатурой: его делает системный композитор (SurfaceFlinger),
- * поэтому в памяти процесса клавиатуры это ничего не стоит. Работает на Android 12+ (API 31),
- * если на устройстве включено «размытие окон» (не работает в режиме экономии, на слабых девайсах).
- * Класс грузится только на API >= 31.
- */
 @TargetApi(31)
 final class Blur {
     interface Callback { void onBlur(boolean on); }
@@ -58,7 +52,7 @@ final class Blur {
         lastOn = key; lastDp = dp;
         float den = svc.getResources().getDisplayMetrics().density;
         if (on) {
-            // почти прозрачный фон со скруглённым верхом: система обрезает размытие по его форме
+
             float r = 16 * den;
             GradientDrawable g = new GradientDrawable();
             g.setColor(Color.argb(1, 255, 255, 255));

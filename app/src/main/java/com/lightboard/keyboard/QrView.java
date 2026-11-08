@@ -6,9 +6,8 @@ import android.graphics.Color;
 import android.graphics.Paint;
 import android.view.View;
 
-/** QR-код из готовой матрицы модулей (рисуется квадратами, без картинок). Матрицы взяты из кодов кошелька и сверены с независимым кодировщиком QR (расхождений 0 модулей), распознаются сканером. */
 final class QrView extends View {
-    // USDT, сеть TRC-20: содержимое — адрес (версия 3, 29x29, коррекция M, маска 7); совпадает с кодом в кошельке до модуля
+
     static final String[] TRC20 = {
         "11111110010001001010001111111",
         "10000010010001110000101000001",
@@ -40,7 +39,7 @@ final class QrView extends View {
         "10000010001010111110100100010",
         "11111110111000001111100001010"
     };
-    // TON / USDT, сеть TON: содержимое — ссылка ton://transfer/<адрес> (версия 5, 37x37, коррекция M, маска 1); совпадает с кодом в кошельке до модуля
+
     static final String[] TON = {
         "1111111011010110101101011100001111111",
         "1000001000000110000100101010001000001",
@@ -95,9 +94,9 @@ final class QrView extends View {
     @Override protected void onMeasure(int w, int h) { setMeasuredDimension(size, size); }
 
     @Override protected void onDraw(Canvas c) {
-        c.drawColor(Color.WHITE); // белая подложка и «тихая зона» нужны сканеру при любой теме приложения
+        c.drawColor(Color.WHITE);
         int n = rows.length;
-        float m = size / (float) (n + 8); // 4 модуля тихой зоны с каждой стороны
+        float m = size / (float) (n + 8);
         p.setColor(Color.BLACK);
         for (int r = 0; r < n; r++) {
             String s = rows[r];

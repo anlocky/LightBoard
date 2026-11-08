@@ -13,7 +13,7 @@ public class LexiconTest {
         int f = 100000;
         for (String w : top) sb.append(w).append(' ').append(f--).append('\n');
         String cons = "bcdfghklmnprstvz", vow = "aeiou";
-        for (int i = 0; i < filler; i++) { // приличное число «слов», чтобы словарь прошёл порог
+        for (int i = 0; i < filler; i++) {
             String w = "" + cons.charAt(i % 16) + vow.charAt((i / 16) % 5) + cons.charAt((i / 80) % 16) + vow.charAt((i / 1280) % 5) + cons.charAt((i / 6400 + i) % 16);
             sb.append(w).append(' ').append(f > 5 ? f-- : 5).append('\n');
         }
@@ -40,7 +40,23 @@ public class LexiconTest {
         assertEquals("good morning", lx.split("goodmorning"));
         assertEquals("thank you", lx.split("thankyou"));
         assertNull(lx.split("qqqqqq"));
-        assertNull(lx.split("hello")); // одно слово не режем
+        assertNull(lx.split("hello"));
+    }
+
+    @Test public void wordShapeSeparatesWordsFromKeyMashing() throws Exception {
+        Lexicon lx = build("en", new String[]{"the", "hello", "world", "banana", "family", "bakery"}, 6000);
+        assertEquals(0, lx.unseenTriples("hello"));
+        assertEquals(0, lx.unseenTriples("banana"));
+        assertTrue(lx.unseenTriples("qxzvkjw") >= 2);
+        assertTrue(lx.unseenTriples("hellq") >= 1);
+        assertEquals(-1, build("en", new String[]{"the"}, 1500).unseenTriples("the"));
+    }
+
+    @Test public void autoCorrectNeedsMoreEvidenceThanASuggestion() throws Exception {
+        Lexicon lx = build("en", new String[]{"the", "hello", "world", "banana", "family", "bakery", "morning"}, 6000);
+        assertEquals("hello", lx.correct("hellp"));
+        assertEquals("hello", lx.autoCorrect("hellp", 0L));
+        assertNull(lx.autoCorrect("hello", 0L));
     }
 
     @Test public void existingWordIsKept() throws Exception {

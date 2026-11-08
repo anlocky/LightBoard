@@ -2,7 +2,6 @@ package com.lightboard.keyboard;
 
 import android.graphics.Path;
 
-/** След непрерывного ввода как в Gboard: сужающаяся лента, хвост которой тает со временем (одним контуром, без наложения и «точек»). */
 final class Trail {
     private Trail() { }
 
@@ -10,7 +9,6 @@ final class Trail {
 
     static boolean live(long[] t, int n, long now) { return n > 1 && now - t[n - 1] < LIFE; }
 
-    /** Строит контур ленты по «живым» точкам (моложе LIFE); false — рисовать нечего. */
     static boolean ribbon(Path p, float[] x, float[] y, long[] t, int n, long now, float headW) {
         int i0 = n;
         while (i0 > 0 && now - t[i0 - 1] < LIFE) i0--;

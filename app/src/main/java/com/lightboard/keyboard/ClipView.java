@@ -13,13 +13,12 @@ import android.view.ViewConfiguration;
 
 import java.util.ArrayList;
 
-/** Панель истории буфера обмена: нажатие по записи вставляет её, булавка закрепляет, крестик удаляет. Рисуется кодом, как и вся клавиатура. */
 final class ClipView extends View {
 
     interface Listener {
         void onPaste(String text);
-        void onAbc();        // вернуться к клавишам
-        void onChanged();    // список изменили (закрепили, удалили, очистили): пора сохранить
+        void onAbc();
+        void onChanged();
     }
 
     private static final float HEAD_H = 46, PAD = 10, GAP = 8, CARD_PAD = 11, LINE = 19, MAX_LINES = 3;
@@ -61,7 +60,6 @@ final class ClipView extends View {
     void setListener(Listener l) { lis = l; }
     void themeChanged() { makeShader(); invalidate(); }
 
-    /** При каждом открытии: какой список показывать и включена ли история. */
     void open(ClipStore s, boolean historyOn) {
         store = s; enabled = historyOn;
         dirty = true; scrollY = 0f;
@@ -80,13 +78,12 @@ final class ClipView extends View {
         W = w; H = h; makeShader(); dirty = true; layout();
     }
 
-    // ---------- раскладка записей ----------
     private void layout() {
         if (!dirty || W == 0 || store == null) return;
         dirty = false;
         int n = store.size();
         lines = new String[n][]; top = new float[n]; hgt = new float[n];
-        float y = (HEAD_H + PAD) * den, maxW = W - 2 * PAD * den - 2 * CARD_PAD * den - 78 * den; // справа — булавка и крестик
+        float y = (HEAD_H + PAD) * den, maxW = W - 2 * PAD * den - 2 * CARD_PAD * den - 78 * den;
         for (int i = 0; i < n; i++) {
             lines[i] = wrap(store.get(i).text, maxW);
             top[i] = y;
@@ -98,7 +95,6 @@ final class ClipView extends View {
         if (scrollY > maxScroll) scrollY = maxScroll;
     }
 
-    /** До MAX_LINES строк по словам; хвост заменяется многоточием. */
     private String[] wrap(String raw, float maxW) {
         String s = raw.replace('\n', ' ').replace('\t', ' ');
         ArrayList<String> out = new ArrayList<>(3);
@@ -123,23 +119,22 @@ final class ClipView extends View {
         return out.toArray(new String[0]);
     }
 
-    // ---------- рисование ----------
     @Override protected void onDraw(Canvas c) {
         float rad = 16 * den;
         c.drawRoundRect(0, 0, W, H + rad, rad, rad, pPanel);
         float hy = HEAD_H * den / 2f;
         pHead.setColor(th.text); pHead.setTextAlign(Paint.Align.CENTER);
-        c.drawText("Буфер обмена", W / 2f, hy + offHead, pHead);
+        c.drawText(KbText.t("Буфер обмена"), W / 2f, hy + offHead, pHead);
         pHead.setTextAlign(Paint.Align.LEFT); pHead.setColor(th.muted);
         c.drawText("ABC", 18 * den, hy + offHead, pHead);
         boolean has = store != null && store.size() > 0;
         if (has) {
             pHead.setTextAlign(Paint.Align.RIGHT);
-            c.drawText("Очистить", W - 16 * den, hy + offHead, pHead);
+            c.drawText(KbText.t("Очистить"), W - 16 * den, hy + offHead, pHead);
         }
-        if (!has || !enabled) { // подписи переносятся по словам, чтобы не выходить за экран
-            String msg = "Скопированное появится здесь";
-            String sub = "Закреплённые записи хранятся всегда";
+        if (!has || !enabled) {
+            String msg = KbText.t("Скопированное появится здесь");
+            String sub = KbText.t("Закреплённые записи хранятся всегда");
             float maxW = W - 48 * den;
             String[] l1 = wrap(msg, maxW), l2 = sub.isEmpty() ? new String[0] : wrap(sub, maxW);
             float lh = LINE * den, gap = l2.length > 0 ? 8 * den : 0f;
@@ -171,7 +166,6 @@ final class ClipView extends View {
         c.restore();
     }
 
-    // ---------- касания ----------
     @Override public boolean onTouchEvent(MotionEvent e) {
         switch (e.getActionMasked()) {
             case MotionEvent.ACTION_DOWN:

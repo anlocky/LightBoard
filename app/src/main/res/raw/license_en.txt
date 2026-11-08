@@ -1,0 +1,12 @@
+LICENSE
+
+LightBoard is free, open-source software.
+Copyright 2026 The LightBoard contributors.
+
+The program is distributed under the Apache License, Version 2.0. You may use, modify and redistribute it under the terms of the license. The full text is in the "Apache License 2.0" section and at https://www.apache.org/licenses/LICENSE-2.0.
+
+A contribution (code, translations, fixes) that you intentionally submit to the project is considered submitted under the same license (section 5 of the license) unless you state otherwise explicitly.
+
+The program is provided "as is", without warranties (see the license). A keyboard receives everything you type, so you decide whether to use it in sensitive fields.
+
+Names and trademarks of other companies and products belong to their owners and are mentioned only to describe compatibility and visual style. The project is independent, is not affiliated with these companies and is not endorsed by them.

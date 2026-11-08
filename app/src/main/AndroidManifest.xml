@@ -1,12 +1,25 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
-    <!-- голосовой ввод: распознавание речи системой (Google); запрашивается при первом нажатии на микрофон -->
+    
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
-    <!-- коды из СМС (только если включено в настройках; текст сообщений не сохраняется) -->
+    
     <uses-permission android:name="android.permission.RECEIVE_SMS"/>
-    <!-- недавние скриншоты в подсказках (только если включено в настройках; на Android 13+ система покажет запрос на доступ к фото) -->
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
-    <!-- уведомлений и доступа к устройствам в локальной сети быть не должно: даже если их добавит библиотека, при сборке они вырезаются -->
+    
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>
+
+    <uses-feature android:name="android.hardware.microphone" android:required="false"/>
+    <uses-feature android:name="android.hardware.telephony" android:required="false"/>
+
+    <queries>
+        <intent><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent>
+        <intent><action android:name="android.intent.action.OPEN_DOCUMENT"/><category android:name="android.intent.category.OPENABLE"/><data android:mimeType="*/*"/></intent>
+        <intent><action android:name="android.intent.action.CREATE_DOCUMENT"/><category android:name="android.intent.category.OPENABLE"/><data android:mimeType="*/*"/></intent>
+        <intent><action android:name="android.settings.INPUT_METHOD_SETTINGS"/></intent>
+        <intent><action android:name="android.settings.INPUT_METHOD_SUBTYPE_SETTINGS"/></intent>
+        <intent><action android:name="android.settings.APPLICATION_DETAILS_SETTINGS"/><data android:scheme="package"/></intent>
+    </queries>
+    
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" tools:node="remove"/>
     <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" tools:node="remove"/>
     <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" tools:node="remove"/>
@@ -16,12 +29,13 @@
         android:label="@string/app_name"
         android:theme="@style/AppTheme"
         android:allowBackup="false"
+        android:usesCleartextTraffic="false"
         android:hardwareAccelerated="true"
         android:supportsRtl="false">
 
+        <!-- must stay exported: the system settings app opens it through android:settingsActivity in xml/method.xml -->
         <activity android:name=".SettingsActivity" android:exported="true" android:process=":settings"/>
 
-        <!-- значок на рабочем столе: включается и выключается в настройках («Ещё») -->
         <activity-alias
             android:name=".LauncherAlias"
             android:targetActivity=".SettingsActivity"
@@ -48,6 +62,8 @@
             android:permission="android.permission.BROADCAST_SMS">
             <intent-filter><action android:name="android.provider.Telephony.SMS_RECEIVED"/></intent-filter>
         </receiver>
+
+        <provider android:name=".PrefsProvider" android:authorities="${applicationId}.prefs" android:exported="false"/>
 
         <service
             android:name=".LightBoardIme"

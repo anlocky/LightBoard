@@ -14,16 +14,15 @@ import android.view.inputmethod.InputConnection;
 import android.view.inputmethod.InputContentInfo;
 import java.io.InputStream;
 
-/** Картинки в подсказках: недавний скриншот и скопированное изображение. Ничего не сохраняется: ни в историю буфера, ни на диск. */
 final class Pics {
     private Pics() { }
 
-    /** Поле принимает изображения (приложение объявило image/* в EditorInfo). */
     static boolean accepts(EditorInfo e) {
         if (e == null || Build.VERSION.SDK_INT < 25) return false;
         String[] t = null;
-        if (Build.VERSION.SDK_INT >= 33) {
-            try { t = (String[]) EditorInfo.class.getMethod("getContentMimeTypes").invoke(e); } catch (Exception ignored) { }
+        try { t = (String[]) EditorInfo.class.getField("contentMimeTypes").get(e); } catch (Exception | LinkageError ignored) { }
+        if (t == null && Build.VERSION.SDK_INT >= 33) {
+            try { t = (String[]) EditorInfo.class.getMethod("getContentMimeTypes").invoke(e); } catch (Exception | LinkageError ignored) { }
         }
         if (t == null && e.extras != null) {
             t = e.extras.getStringArray("androidx.core.view.inputmethod.EditorInfoCompat.CONTENT_MIME_TYPES");
@@ -34,18 +33,22 @@ final class Pics {
         return false;
     }
 
-    /** Самый свежий скриншот за последние две минуты (папка с «screenshot»/«скриншот» в пути). Вызывать не из главного потока. */
+    /** Images only on Android 13+ (the old storage permission no longer covers media there). */
+    static String imagesPermission() {
+        return Build.VERSION.SDK_INT >= 33 ? "android.permission.READ_MEDIA_IMAGES" : "android.permission.READ_EXTERNAL_STORAGE";
+    }
+
     static Uri latestScreenshot(Context c) {
         String col = Build.VERSION.SDK_INT >= 29 ? "relative_path" : "_data";
+        long since = System.currentTimeMillis() / 1000 - 120;
         try (Cursor cur = c.getContentResolver().query(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, new String[]{"_id"},
-                "date_added>=? AND (" + col + " LIKE ? OR " + col + " LIKE ?)",
-                new String[]{String.valueOf(System.currentTimeMillis() / 1000 - 120), "%creenshot%", "%криншот%"}, "date_added DESC")) {
+                "date_added>=" + since + " AND (" + col + " LIKE ? OR " + col + " LIKE ? OR _display_name LIKE ? OR _display_name LIKE ?)",
+                new String[]{"%creenshot%", "%криншот%", "Screenshot%", "Скриншот%"}, "date_added DESC")) {
             if (cur != null && cur.moveToFirst()) return ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, cur.getLong(0));
         } catch (RuntimeException ignored) { }
         return null;
     }
 
-    /** Маленькая копия (около 100 px по меньшей стороне): большая картинка в память не загружается. Не из главного потока. */
     static Bitmap thumb(Context c, Uri u) {
         try {
             BitmapFactory.Options o = new BitmapFactory.Options();

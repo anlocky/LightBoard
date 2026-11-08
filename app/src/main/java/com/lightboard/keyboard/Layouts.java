@@ -3,20 +3,15 @@ package com.lightboard.keyboard;
 import java.util.ArrayList;
 import java.util.Locale;
 
-/**
- * Раскладки языков (только клавиши, без картинок и шрифтов). Словари (подсказки, автоисправление, непрерывный ввод)
- * есть у en и ru; у остальных языков эти функции выключены автоматически, остаются сами клавиши и долгое нажатие на
- * буквы с диакритикой. Ряды записаны слева направо, как на экране. Весь класс — несколько килобайт.
- */
 final class Layouts {
     private Layouts() { }
 
     static final class L {
         final String id, name, space, tag, cur, r1, r2, r3;
         final boolean lex, ru;
-        final int cols;                 // сколько клавиш помещается в самом широком ряду (с учётом shift/стереть в третьем)
-        private final String[] alts;    // «буква:вариант|вариант»
-        private final Locale loc;       // для регистра (турецкая «i» -> «İ»)
+        final int cols;
+        private final String[] alts;
+        private final Locale loc;
 
         L(String id, String name, String space, String tag, String cur, String r1, String r2, String r3, String alts, boolean lex, Locale loc) {
             this.id = id; this.name = name; this.space = space; this.tag = tag; this.cur = cur;
@@ -26,10 +21,9 @@ final class Layouts {
             this.cols = Math.max(Math.max(r1.length(), r2.length()), r3.length() + 2);
         }
 
-        @Override public boolean equals(Object o) { return o instanceof L && ((L) o).id.equals(id); } // после импорта словаря объект раскладки пересоздаётся: сравниваем по id
+        @Override public boolean equals(Object o) { return o instanceof L && ((L) o).id.equals(id); }
         @Override public int hashCode() { return id.hashCode(); }
 
-        /** Варианты при долгом нажатии (через «|») или null. */
         String alt(char c) {
             for (String a : alts) if (a.charAt(0) == c) return a.substring(2);
             return null;
@@ -37,17 +31,14 @@ final class Layouts {
 
         String upper(String s) { return s.toUpperCase(loc); }
 
-        /** Свой словарь (подсказки, исправление, свайп): английский и (в сборке с русским словарём) русский независимо от языка телефона; у остальных — системная проверка орфографии. */
         boolean own() { return Lexicon.has(id); }
 
-        /** Три буквенных ряда планшетной раскладки: у английского и русского как на ПК-клавиатуре Gboard, у остальных — телефонные ряды плюс «,.». */
         String[] tabletRows() {
             if (id.equals("en")) return new String[]{"qwertyuiop[]", "asdfghjkl;'", "zxcvbnm,./"};
             if (id.equals("ru")) return new String[]{"йцукенгшщзхъ", "фывапролджэ", "ячсмитьбю,."};
             return new String[]{r1, r2, r3 + ",."};
         }
 
-        /** Верхний регистр, если он не меняет длину (ß -> SS не годится: оставляем как есть). */
         String upperKeep(String s) {
             String u = s.toUpperCase(loc);
             return u.length() == s.length() ? u : s;
@@ -89,7 +80,6 @@ final class Layouts {
         new L("fa", "فارسی", "فاصله", "fa-IR", "$", "ضصثقفغعهخحج\u0686", "شسی\u0628لاتنم\u06A9\u06AF".replace("ی", "\u06CC").replace("\u0628", "ب"), "ظطزرذد\u067E\u0648".replace("\u0648", "و"), "ا:آ|أ;و:ؤ;\u06CC:ئ;ز:\u0698;ه:ة", false, Locale.ROOT),
     };
 
-    /** Знаки цифровой клавиатуры (A, B, C, D) для числа со знаком или точкой (4), телефона (2) и даты/времени (3). */
     private static final String[] PAD_NUM = {",", ".", "-", "+"}, PAD_PHONE = {"*", "#", "+", "-"}, PAD_DATE = {"/", ":", "-", " "};
 
     static String[] pad(int mode) { return mode == 2 ? PAD_PHONE : mode == 3 ? PAD_DATE : PAD_NUM; }
@@ -99,17 +89,14 @@ final class Layouts {
         return null;
     }
 
-    /** Код языка из локали системы («ru_RU», «iw», «in», «no»…) -> раскладка или null. */
-    // ---------- языки без своей раскладки: латиница -> QWERTY, кириллица -> ЙЦУКЕН ----------
     private static final String GEN_LATIN = ",ca,et,lv,lt,sl,sq,is,af,ms,tl,eo,eu,gl,vi,bs,br,cy,ga,mt,lb,sw,uz,az,fo,gd,so,zu,xh,ha,yo,mg,ht,ku,mi,fy,tk,",
             GEN_CYR = ",bg,sr,mk,kk,ky,mn,tg,tt,ba,ce,cv,os,ab,kv,",
-            GEN_AUTO = ",hy,ka,th,hi,bn,ta,te,ml,si,ur,"; // письменности без своей раскладки: ряды собираются из алфавита (словаря языка или встроенного)
+            GEN_AUTO = ",hy,ka,th,hi,bn,ta,te,ml,si,ur,";
     private static final java.util.HashMap<String, L> gen = new java.util.HashMap<>();
-    private static final java.util.HashMap<String, String> extras = new java.util.HashMap<>(); // алфавит словаря языка (заполняет Lexicon)
+    private static final java.util.HashMap<String, String> extras = new java.util.HashMap<>();
 
     static synchronized void alphabetChanged(String lang, String alphabet) { extras.put(lang, alphabet); gen.remove(lang); }
 
-    /** Для какого письма раскладка: 1 латиница, 2 кириллица, 3 греческий, 4 иврит (по первой букве первого ряда). */
     static int script(String lang) {
         L l = byLang(lang);
         return LexBuilder.sc(l != null && !l.r1.isEmpty() ? l.r1.charAt(0) : 'a');
@@ -117,7 +104,6 @@ final class Layouts {
 
     private static final String LAT_BASE = "\u00DFs\u0142l\u0111d\u00F8o\u00E6a\u0131i\u00F0d\u00FEt\u0153o\u0167t\u014Bn", CYR_BASE = "\u04D9\u0430\u0493\u0433\u049B\u043A\u04A3\u043D\u04E9\u043E\u04B1\u0443\u04AF\u0443\u04BB\u0445\u0456\u0438\u0457\u0438\u0454\u0435\u0491\u0433\u0458\u0439\u0459\u043B\u045A\u043D\u045B\u0446\u0452\u0434\u045F\u0447";
 
-    /** Буквы словаря, которых нет в рядах раскладки, группируются по «родной» букве: из них получается меню по удержанию. */
     private static String altsFor(String alphabet, boolean cyr, String rows) {
         if (alphabet == null) return "";
         java.util.LinkedHashMap<Character, StringBuilder> m = new java.util.LinkedHashMap<>();
@@ -158,7 +144,6 @@ final class Layouts {
         return l;
     }
 
-    /** Алфавиты языков из GEN_AUTO, пока словаря нет: буквы, затем знаки гласных. */
     private static String baseAlphabet(String c) {
         switch (c) {
             case "hy": return "աբգդեզէըթժիլխծկհձղճմյնշոչպջռսվտրցւփքօֆ";
@@ -175,18 +160,17 @@ final class Layouts {
         }
     }
 
-    /** Раскладка для письменности без готовой: буквы по алфавиту в три ряда, знаки гласных и лишние буквы — в меню удержания. */
     private static L autoLayout(String c, String nm, Locale loc) {
         String alpha = extras.get(c);
         if (alpha == null || alpha.length() < 8) alpha = baseAlphabet(c);
         StringBuilder let = new StringBuilder(), rest = new StringBuilder();
         for (int i = 0; i < alpha.length(); i++) { char x = alpha.charAt(i); if (Character.isLetter(x)) let.append(x); else rest.append(x); }
-        if (let.length() > 31) { rest.insert(0, let.substring(31)); let.setLength(31); } // в ряды помещается 11 + 11 + 9
+        if (let.length() > 31) { rest.insert(0, let.substring(31)); let.setLength(31); }
         int n = let.length();
         int a = Math.min(11, (n + 2) / 3), b = Math.min(11, (n - a + 1) / 2);
         if (n - a - b > 9) { a = 11; b = 11; }
         StringBuilder al = new StringBuilder();
-        if (rest.length() > 0 && n > 0) { // оставшиеся знаки раздаём клавишам по 2–4 штуки
+        if (rest.length() > 0 && n > 0) {
             int g = (rest.length() + n - 1) / n, pos = 0;
             for (int k = 0; k < n && pos < rest.length(); k++) {
                 int e = Math.min(rest.length(), pos + g);
@@ -199,7 +183,6 @@ final class Layouts {
         return new L(c, nm, "space", c, "$", let.substring(0, a), let.substring(a, a + b), let.substring(a + b), al.toString(), true, loc);
     }
 
-    /** Все языки, для которых есть раскладка (свои и общие латиница/кириллица). */
     static String[] supportedIds() {
         java.util.ArrayList<String> o = new java.util.ArrayList<>();
         for (L l : ALL) o.add(l.id);
@@ -219,7 +202,6 @@ final class Layouts {
         return l != null ? l : generic(c);
     }
 
-    /** Язык интерфейса телефона, если для него есть раскладка, иначе английский. */
     static L system() {
         L l = byLang(Locale.getDefault().getLanguage());
         return l != null ? l : EN;

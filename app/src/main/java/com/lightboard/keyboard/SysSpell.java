@@ -8,16 +8,14 @@ import android.view.textservice.TextServicesManager;
 
 import java.util.Locale;
 
-/** Подсказки слов для языков без своего словаря: системная проверка орфографии (ничего не скачивается и не хранится в приложении). */
 final class SysSpell implements SpellCheckerSession.SpellCheckerSessionListener {
     interface Cb { void got(String word, String[] suggestions); }
 
     private SpellCheckerSession ses;
     private String tag = "", asked = "";
     private Cb cb;
-    private int seq; // номер запроса: ответ на прошлое слово не должен попасть к новому
+    private int seq;
 
-    /** false — системной проверки орфографии для языка нет. */
     boolean ask(Context c, String languageTag, String word, Cb callback) {
         try {
             if (ses == null || !languageTag.equals(tag)) {

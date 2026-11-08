@@ -31,7 +31,7 @@ public class LayoutsTest {
         assertFalse(Layouts.byLang("kk").equals(Layouts.byLang("bg")));
     }
 
-    @Test public void everyLetterIsReachable() { // знаки гласных и лишние буквы доступны удержанием клавиши
+    @Test public void everyLetterIsReachable() {
         Layouts.L l = Layouts.byLang("hi");
         StringBuilder reach = new StringBuilder(l.r1 + l.r2 + l.r3);
         for (char c : (l.r1 + l.r2 + l.r3).toCharArray()) { String a = l.alt(c); if (a != null) reach.append(a.replace("|", "")); }

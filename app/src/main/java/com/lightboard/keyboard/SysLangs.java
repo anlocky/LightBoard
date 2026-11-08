@@ -6,11 +6,9 @@ import android.view.inputmethod.InputMethodManager;
 import android.view.inputmethod.InputMethodSubtype;
 import java.util.ArrayList;
 
-/** Единый список языков: тот, что включён в системных настройках клавиатуры («Многоязычный ввод»). Отдельного списка в приложении нет. */
 final class SysLangs {
     private SysLangs() { }
 
-    /** Раскладки включённых в системе языков (по порядку); если ничего не включено — язык телефона. */
     static ArrayList<Layouts.L> enabled(Context c, ArrayList<InputMethodSubtype> subtypes) {
         ArrayList<Layouts.L> out = new ArrayList<>();
         try {
