@@ -4,7 +4,7 @@
 
 # LightBoard
 
-A lightweight, private keyboard for Android. Two designs (Material and an iOS-style Cupertino), swipe typing, smart suggestions from dictionaries you build yourself, an encrypted clipboard history and a small, fast, battery-friendly core.
+A lightweight, private keyboard for Android. Two designs (Material and Cupertino), swipe typing, smart suggestions from dictionaries, an encrypted clipboard history and a small, fast, battery-friendly core.
 
 - **No internet permission.** No analytics, no ads, no tracking.
 - **Encrypted local data.** Clipboard history and learned words are sealed with a key held in the Android Keystore.
@@ -56,16 +56,6 @@ A lightweight, private keyboard for Android. Two designs (Material and an iOS-st
 ## Dictionaries
 
 Build dictionaries inside the app from frequency lists (one `word count` per line): *Settings → Dictionaries → Import dictionary from file*. The language is taken from the file name (for example `en_50k.txt`) or detected from the words. After the import the source file can be deleted, the app keeps its own compact copy; *Delete dictionaries* removes it again. Source licenses are listed in [`NOTICE`](NOTICE).
-
-## Build
-
-```
-gradle assembleRelease
-```
-
-Create `keystore.properties` to sign a release (the file is git-ignored). Without it the build is signed with the debug key and prints a warning; `-Plb.strictSigning=true` turns the warning into an error. Unit tests: `gradle testDebugUnitTest`.
-
-Requirements: Android 6.0 (API 23) or newer. The app targets and compiles against Android 16 (API 36).
 
 ## Support the project
 
