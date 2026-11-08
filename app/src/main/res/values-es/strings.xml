@@ -1,7 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <string name="incognito_on">Incógnito activado</string>
-    <string name="incognito_off">Incógnito desactivado</string>
-    <string name="chip_screenshot">Captura</string>
-    <string name="chip_image">Imagen</string>
-</resources>

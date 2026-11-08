@@ -1,7 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <string name="incognito_on">Navigation privée activée</string>
-    <string name="incognito_off">Navigation privée désactivée</string>
-    <string name="chip_screenshot">Capture d’écran</string>
-    <string name="chip_image">Image</string>
-</resources>

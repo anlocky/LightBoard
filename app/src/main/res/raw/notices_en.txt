@@ -1,9 +1,0 @@
-THIRD-PARTY COMPONENTS AND DATA
-
-1. The app builds a dictionary on your device from a frequency list that you choose yourself. One common source is FrequencyWords (author Hermit Dave, https://github.com/hermitdave/FrequencyWords; license CC BY-SA 4.0, https://creativecommons.org/licenses/by-sa/4.0/; data derived from OpenSubtitles subtitles and the OPUS corpus). If you redistribute dictionaries you built, follow the license of the source list: attribution and sharing under the same terms.
-
-2. androidx.autofill — Copyright © The Android Open Source Project. Apache License 2.0; the full text is in the "Apache License 2.0" section and at https://www.apache.org/licenses/LICENSE-2.0.
-
-3. The emoji list is based on Unicode data (Copyright © Unicode, Inc.) under the Unicode License v3: https://www.unicode.org/license.txt. The glyph images themselves are drawn by your system font.
-
-4. System services of the device (speech recognition, spell checking, autofill, clipboard) belong to their owners and work under their terms.
