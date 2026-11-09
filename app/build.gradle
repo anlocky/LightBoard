@@ -1,0 +1,91 @@
+plugins { id 'com.android.application' }
+
+android {
+    namespace 'com.lightboard.keyboard'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.lightboard.keyboard'
+        minSdk 23
+        targetSdk 34
+        versionCode 1
+        versionName '1.0'
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+
+    def ksFile = rootProject.file('keystore.properties')
+    if (ksFile.exists()) {
+        def kp = new Properties()
+        ksFile.withInputStream { kp.load(it) }
+        signingConfigs {
+            release {
+                storeFile file(kp['storeFile']); storePassword kp['storePassword']
+                keyAlias kp['keyAlias']; keyPassword kp['keyPassword']
+            }
+        }
+    }
+
+    if (!ksFile.exists()) {
+        def msg = 'LightBoard: keystore.properties не найден, релиз будет подписан DEBUG-ключом'
+        if (project.hasProperty('lb.strictSigning')) throw new GradleException(msg)
+        logger.warn('WARNING: ' + msg)
+    }
+
+    dependenciesInfo { includeInApk = false; includeInBundle = false }
+
+    testOptions { unitTests.returnDefaultValues = true }
+
+    packaging { resources.excludes += ['META-INF/**', 'kotlin/**', '**/*.kotlin_*', 'DebugProbesKt.bin'] }
+
+    buildTypes {
+        release {
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            signingConfig ksFile.exists() ? signingConfigs.release : signingConfigs.debug
+        }
+    }
+
+    lint { abortOnError false; checkReleaseBuilds false }
+}
+
+dependencies {
+    implementation 'androidx.autofill:autofill:1.1.0'
+    testImplementation 'junit:junit:4.13.2'
+}
+
+tasks.register('packLex') {
+    group = 'lightboard'
+    description = 'Packs src/dictionaries/<lang>.txt into compact src/main/assets/lex/lex_<lang>.lex'
+    doLast {
+        def srcDir = file('src/dictionaries')
+        srcDir.mkdirs()
+        def outDir = file('src/main/assets/lex')
+        def lists = (srcDir.listFiles() ?: new File[0]).findAll { it.isFile() && it.name ==~ /(lex_)?[a-z]{2,3}(-[A-Za-z0-9]{2,8})?\.(txt|lex)/ }
+        if (lists.isEmpty()) { logger.lifecycle('packLex: в ' + srcDir + ' нет файлов <язык>.txt'); return }
+        def cls = new File(layout.buildDirectory.get().asFile, 'lextool')
+        cls.deleteDir()
+        cls.mkdirs()
+        def jc = javax.tools.ToolProvider.getSystemJavaCompiler()
+        if (jc == null) throw new GradleException('packLex: нужен JDK (компилятор Java), а не JRE')
+        def srcs = [file('src/main/java/com/lightboard/keyboard/LexBuilder.java'), file('tools/LexTool.java'), file('tools/stub/Layouts.java')]
+        def args = ['-d', cls.path, '-encoding', 'UTF-8'] + srcs.collect { it.path }
+        if (jc.run(null, null, null, args as String[]) != 0) throw new GradleException('packLex: не удалось скомпилировать инструмент')
+        def loader = new URLClassLoader([cls.toURI().toURL()] as URL[], (ClassLoader) null)
+        def pack = loader.loadClass('com.lightboard.keyboard.LexTool').getMethod('pack', String, File, File)
+        outDir.mkdirs()
+        lists.each { f ->
+            def id = f.name.replaceAll(/\.(txt|lex)$/, '').replaceFirst(/^lex_/, '')
+            if (f.name.endsWith('.lex')) {
+                new File(outDir, 'lex_' + id + '.lex').bytes = f.bytes
+                println 'packLex: ' + id + ' (готовый .lex скопирован)'
+            } else {
+                println 'packLex: ' + pack.invoke(null, id, f, outDir)
+            }
+        }
+    }
+}
