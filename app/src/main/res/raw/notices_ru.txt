@@ -1,0 +1,9 @@
+СТОРОННИЕ КОМПОНЕНТЫ И ДАННЫЕ
+
+1. Приложение собирает словарь на вашем устройстве из частотного списка, который вы выбрали сами. Один из распространённых источников — FrequencyWords (автор Hermit Dave, https://github.com/hermitdave/FrequencyWords; лицензия CC BY-SA 4.0, https://creativecommons.org/licenses/by-sa/4.0/; данные получены из субтитров OpenSubtitles и корпуса OPUS). Если вы распространяете собранные словари, соблюдайте лицензию исходного списка: указание авторства и распространение на тех же условиях.
+
+2. androidx.autofill — Copyright © The Android Open Source Project. Лицензия Apache License 2.0, полный текст — в разделе «Лицензия Apache 2.0» и по адресу https://www.apache.org/licenses/LICENSE-2.0.
+
+3. Список эмодзи основан на данных Unicode (Copyright © Unicode, Inc.), лицензия Unicode License v3: https://www.unicode.org/license.txt. Сами изображения символов рисует шрифт вашей системы.
+
+4. Системные службы устройства (распознавание речи, проверка орфографии, автозаполнение, буфер обмена) принадлежат их правообладателям и работают на их условиях.
