@@ -4,7 +4,7 @@
 
 # LightBoard
 
-**Screenshots:** https://drive.google.com/drive/folders/19qA0W0ss2sixZEYYyWG34ktCT-dyHhoT
+**Screenshots:** https://drive.google.com/drive/folders/19qA0W0ss2sixZEYYyWG34ktCT-dyHhoT?usp=drive_link
 
 A lightweight, private keyboard for Android. Two designs (Material and an iOS-style Cupertino), swipe typing, smart suggestions from dictionaries you build yourself, an encrypted clipboard history and a small, fast, battery-friendly core.
 
