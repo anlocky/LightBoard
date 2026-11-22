@@ -4,7 +4,7 @@
 
 # LightBoard
 
-**Скриншоты:** https://drive.google.com/drive/folders/19qA0W0ss2sixZEYYyWG34ktCT-dyHhoT?usp=drive_link
+**Скриншоты:** https://drive.google.com/drive/folders/19qA0W0ss2sixZEYYyWG34ktCT-dyHhoT?usp=sharing
 
 Лёгкая и приватная клавиатура для Android. Два дизайна (Material и Cupertino в стиле iOS), свайп-ввод, умные подсказки по словарям, которые вы собираете сами, зашифрованная история буфера обмена и небольшое быстрое ядро, бережное к батарее.
 
