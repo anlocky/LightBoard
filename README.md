@@ -66,16 +66,18 @@ Dictionaries are built on your device from frequency lists (one `word count` per
 
 The language is taken from the file name (for example `en_50k.txt`) or detected from the words. Lists with counts are sorted by frequency, files up to 96 MB are accepted. After the import the source file can be deleted, the app keeps its own compact copy; every imported dictionary has a *Delete* button with a confirmation. Source licenses are listed in [`NOTICE`](NOTICE).
 
-## What's new in 1.1.0
+## What's New in 1.2.0
 
-- **Dictionaries:** two-step download and import, deleting each dictionary separately, import that respects word counts, a file size limit.
-- **Swipe typing:** more accurate (real finger timing, word-pair context, keys of any script), decoding runs off the main thread, a stuck-gesture case and missing right-edge letters with the number row are fixed.
-- **Suggestions and autocorrection** use the words and word pairs you have learned.
-- **One engine for both designs:** Material and Cupertino behave the same and differ only in look and layout.
-- **Backup:** show/hide button on password fields, files are read in the background.
-- **Clipboard:** history is not recorded in fields that forbid personalised learning.
-- **Language swipe on the space bar:** adjustable activation distance.
-- **Android 16:** the app now compiles and targets API 36.
+- Clipboard History: smooth animations, swipe gestures to delete or pin items, button haptic/visual feedback, and a confirmation prompt before clearing all history.
+- Comma Key & Extra Symbols: optional comma key (tap for comma, hold for emojis) plus 120+ additional long-press characters (№ and more).
+- Tablet Settings Layout: new two-pane layout with navigation on the left and content on the right.
+- Design-Specific Appearance: switching between Material and Cupertino now only affects the "Look" tab, while all other settings remain global.
+- Quick Settings Shortcut: long-press the Enter key to open keyboard settings directly.
+- Adaptive Touch Zones: the keyboard subtly learns where your fingers actually land and shifts key hitboxes accordingly for better accuracy.
+- Swipe-to-Delete Words: swipe left from the Backspace key to highlight words, release to delete them, or slide back to cancel.
+- English Contractions: automatic apostrophe insertion for both tap and swipe typing (dont → don't).
+- Typing & Autocorrect: slightly improved the quality of swipe typing, suggestions, and autocorrect.
+- Various bug fixes and smoother UI animations.
 
 ## Build
 
